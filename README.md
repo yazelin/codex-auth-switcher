@@ -348,3 +348,7 @@ $env:CX_CODEX_HOME = "$HOME\.codex"
 This tool does not automatically switch to another account after a limit is reached. It records which profile appears limited and when it should reset, then lets you choose the next profile with `cx use <name>`.
 
 Auth profiles contain tokens. Do not commit `~/.codex_auth_profiles` or any `auth.json` file.
+
+## Prior Art
+
+See [docs/prior-art.md](docs/prior-art.md) for notes comparing this small wrapper with `Lampese/codex-switcher`.
