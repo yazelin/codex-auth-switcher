@@ -18,7 +18,7 @@ The upstream project describes itself as a desktop app for managing multiple Ope
 
 Its implementation stores account records in `~/.codex-switcher/accounts.json`, then switches accounts by writing credentials into Codex's active `auth.json`.
 
-## Useful Ideas To Keep
+## Ideas Adopted Here
 
 The account-switching model confirms our chosen approach:
 
@@ -26,14 +26,15 @@ The account-switching model confirms our chosen approach:
 stored profiles -> write active credentials to ~/.codex/auth.json
 ```
 
-Good ideas worth borrowing conceptually:
+Borrowed ideas implemented in this repo:
 
-- Parse ChatGPT `id_token` claims to derive email, plan type, and account id when available.
+- Parse ChatGPT `id_token` claims to derive masked email, plan type, subscription expiry, and account id when available.
 - Keep the displayed profile name user-controlled even when metadata exists.
 - Detect active Codex processes before switching, because shared `auth.json` is unsafe during concurrent runs.
 - Treat usage/limit state as account-specific metadata, not shared Codex-home metadata.
 - Preserve `CODEX_HOME` override support.
 - Set restrictive file permissions for stored auth on Unix.
+- Provide simple profile export/restore without building a desktop app.
 
 ## What We Should Not Copy
 
@@ -68,10 +69,8 @@ Stay with the minimal design:
 
 These would keep the project small while taking the best ideas:
 
-- Add optional `cx info <name>` that reads `id_token` from `auth.json` and displays masked email, plan type, and account id.
-- Improve process detection with a `cx doctor` or `cx ps` command.
-- Add `cx export` / `cx import` for profile directories, without building a desktop app.
 - Add Windows process-lock cleanup for stale lock directories.
+- Add encrypted export archives if plain tar.gz is not acceptable for a workflow.
 
 ## Policy Boundary
 

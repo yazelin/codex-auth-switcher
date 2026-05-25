@@ -165,8 +165,13 @@ Linux/macOS and Windows use the same commands:
 
 ```bash
 cx list
+cx info <name>
 cx use <name>
 cx login <name>
+cx ps
+cx doctor
+cx export profiles.tgz
+cx restore profiles.tgz
 cx ok <name>
 codex
 ```
@@ -174,13 +179,28 @@ codex
 `cx list` shows:
 
 ```text
-CURRENT  PROFILE                  LOGIN      LIMIT
-*        main                     ok         -
-         team-a                   ok         hit until 2026-05-25 17:06
-         coworker-1               not-login  -
+CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       LIMIT
+*        main                     ok         ma***@example.com            plus       -
+         team-a                   ok         te***@example.com            team       hit until 2026-05-25 17:06
+         coworker-1               not-login  -                            -          -
 ```
 
-`LOGIN` is based on whether that profile has a saved `auth.json`. Codex does not expose the ChatGPT email in a reliable CLI status command, so this tool uses your profile label as the account name.
+`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. Email and account IDs are masked for terminal display.
+
+`cx info <name>` shows one profile in key-value form:
+
+```text
+profile=main
+current=yes
+login=ok
+auth_mode=chatgpt
+email=ma***@example.com
+plan=plus
+account_id=acc_1234...cdef
+subscription_expires_at=2026-04-23T05:03:38+00:00
+limit=-
+profile_dir=/home/me/.codex_auth_profiles/main
+```
 
 ## Limit Tracking
 
@@ -299,6 +319,46 @@ This tool uses one shared `~/.codex/auth.json`, so it takes a lock while running
 
 That means you should not run two different auth profiles at the same time in the same shared Codex home. The lock prevents accidental overlapping `cx` runs because overlapping would make `auth.json` ambiguous.
 
+`cx use`, `cx login`, and wrapped `codex` runs also check for other active Codex processes before changing `auth.json`.
+
+```bash
+cx ps
+cx doctor
+```
+
+`cx ps` lists detected Codex processes as `active` or `background`. `active` processes block switching by default. `background` processes such as app-server or IDE helper processes are shown but do not block.
+
+To override the process guard:
+
+```bash
+CX_ALLOW_ACTIVE_CODEX=1 cx use <name>
+```
+
+PowerShell:
+
+```powershell
+$env:CX_ALLOW_ACTIVE_CODEX = "1"
+cx use <name>
+```
+
+## Export And Restore
+
+Profiles can be copied to another machine as a tar.gz archive:
+
+```bash
+cx export profiles.tgz
+cx restore profiles.tgz
+```
+
+PowerShell uses the same commands:
+
+```powershell
+cx export profiles.tgz
+cx restore profiles.tgz
+```
+
+The archive contains auth tokens. Keep it private and delete it when you are done moving profiles.
+
 ## Environment
 
 Defaults:
@@ -341,6 +401,18 @@ Windows:
 
 ```powershell
 $env:CX_CODEX_HOME = "$HOME\.codex"
+```
+
+Allow switching while active Codex processes are detected:
+
+```bash
+export CX_ALLOW_ACTIVE_CODEX=1
+```
+
+Windows:
+
+```powershell
+$env:CX_ALLOW_ACTIVE_CODEX = "1"
 ```
 
 ## Safety Notes

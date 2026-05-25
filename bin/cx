@@ -19,9 +19,14 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
-  cx list                   List profiles, login state, and limit state
+  cx list                   List profiles, login, metadata, and limit state
+  cx info [name]            Show metadata for one profile
   cx current                Print active profile
   cx run -- [codex args]    Run codex with the active auth profile
+  cx ps                     Show Codex processes that can affect switching
+  cx doctor                 Show paths, process state, and profile summary
+  cx export <archive.tgz>   Export auth profiles to a tar.gz archive
+  cx restore <archive.tgz>  Restore auth profiles from a tar.gz archive
   cx scan-limit [name]      Scan latest Codex session and update .limit
   cx limit <name> [epoch]   Manually mark a profile as limited
   cx ok <name>              Clear a profile's limit marker
@@ -33,6 +38,7 @@ environment:
   CX_CODEX_HOME             Default: $CODEX_HOME or ~/.codex
   CX_CODEX_BIN              Optional path to the real codex executable
   CX_LIMIT_THRESHOLD        Default: 100
+  CX_ALLOW_ACTIVE_CODEX     Set to 1 to switch even if Codex is running
 EOF
 }
 
@@ -55,6 +61,11 @@ shared_auth() {
 
 profile_auth() {
     printf '%s/auth.json\n' "$(profile_dir "$1")"
+}
+
+secure_auth_file() {
+    local file="$1"
+    chmod 600 "$file" 2>/dev/null || true
 }
 
 current_profile() {
@@ -134,6 +145,7 @@ stage_profile_auth() {
     auth="$(profile_auth "$name")"
     [ -f "$auth" ] || die "profile has no auth.json: $name; run: cx login $name"
     cp "$auth" "$(shared_auth)"
+    secure_auth_file "$(shared_auth)"
 }
 
 store_profile_auth() {
@@ -141,6 +153,7 @@ store_profile_auth() {
     [ -f "$(shared_auth)" ] || return 0
     mkdir -p "$(profile_dir "$name")"
     cp "$(shared_auth)" "$(profile_auth "$name")"
+    secure_auth_file "$(profile_auth "$name")"
 }
 
 set_current_profile() {
@@ -156,6 +169,164 @@ auth_state() {
     else
         printf 'not-login\n'
     fi
+}
+
+json_value() {
+    local file="$1"
+    local filter="$2"
+    command -v jq >/dev/null 2>&1 || return 1
+    [ -f "$file" ] || return 1
+    jq -r "$filter // empty" "$file" 2>/dev/null | sed -n '1p'
+}
+
+decode_base64_url() {
+    local value="$1"
+    local mod
+    value="${value//-/+}"
+    value="${value//_//}"
+    mod=$(( ${#value} % 4 ))
+    case "$mod" in
+        0) ;;
+        2) value="${value}==" ;;
+        3) value="${value}=" ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$value" | base64 -d 2>/dev/null
+}
+
+decode_jwt_payload() {
+    local token="$1"
+    local payload
+    [ -n "$token" ] || return 1
+    payload="${token#*.}"
+    payload="${payload%%.*}"
+    [ -n "$payload" ] || return 1
+    decode_base64_url "$payload"
+}
+
+mask_email() {
+    local email="$1"
+    local local_part domain prefix
+    [ -n "$email" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    case "$email" in
+        *@*)
+            local_part="${email%@*}"
+            domain="${email#*@}"
+            prefix="${local_part:0:2}"
+            [ ${#local_part} -lt 2 ] && prefix="${local_part:0:1}"
+            printf '%s***@%s\n' "$prefix" "$domain"
+            ;;
+        *)
+            printf '%s\n' "$email"
+            ;;
+    esac
+}
+
+mask_id() {
+    local value="$1"
+    [ -n "$value" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    if [ ${#value} -le 12 ]; then
+        printf '%s\n' "$value"
+    else
+        printf '%s...%s\n' "${value:0:8}" "${value: -4}"
+    fi
+}
+
+profile_metadata() {
+    local name="$1"
+    local auth token payload mode email plan account_id expires_at
+    auth="$(profile_auth "$name")"
+
+    [ -f "$auth" ] || {
+        printf 'not-login\t-\t-\t-\t-\n'
+        return 0
+    }
+
+    token="$(json_value "$auth" '.tokens.id_token' || true)"
+    if [ -n "$token" ]; then
+        mode="chatgpt"
+        payload="$(decode_jwt_payload "$token" || true)"
+        if [ -n "$payload" ] && command -v jq >/dev/null 2>&1; then
+            email="$(printf '%s\n' "$payload" | jq -r '.email // empty' 2>/dev/null | sed -n '1p')"
+            plan="$(printf '%s\n' "$payload" | jq -r '."https://api.openai.com/auth".chatgpt_plan_type // empty' 2>/dev/null | sed -n '1p')"
+            account_id="$(printf '%s\n' "$payload" | jq -r '."https://api.openai.com/auth".chatgpt_account_id // empty' 2>/dev/null | sed -n '1p')"
+            expires_at="$(printf '%s\n' "$payload" | jq -r '."https://api.openai.com/auth".chatgpt_subscription_active_until // empty' 2>/dev/null | sed -n '1p')"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$mode" "${email:--}" "${plan:--}" "${account_id:--}" "${expires_at:--}"
+        return 0
+    fi
+
+    if [ -n "$(json_value "$auth" '."OPENAI_API_KEY"' || true)" ]; then
+        printf 'api_key\t-\tapi_key\t-\t-\n'
+    else
+        printf 'unknown\t-\t-\t-\t-\n'
+    fi
+}
+
+codex_process_rows() {
+    local output
+    output="$(ps -axo pid=,tty=,command= 2>/dev/null || ps -eo pid=,tty=,args= 2>/dev/null || true)"
+    [ -n "$output" ] || return 0
+
+    while read -r pid tty command; do
+        [ -n "${pid:-}" ] || continue
+        [ -n "${command:-}" ] || continue
+
+        local lower first base kind
+        lower="$(printf '%s\n' "$command" | tr '[:upper:]' '[:lower:]')"
+        case "$lower" in
+            *codex-auth-switcher*|*"/bin/cx ps"*|*" bin/cx ps"*|*" bin/cx doctor"*) continue ;;
+        esac
+
+        first="${command%% *}"
+        base="${first##*/}"
+        kind=""
+
+        if [ "$base" = "codex" ] || [ "$base" = "codex.exe" ] || [ "$base" = "Codex" ]; then
+            kind="active"
+        elif printf '%s\n' "$command" | grep -q '.app/Contents/MacOS/Codex'; then
+            case "$command" in
+                *"Codex Helper"*|*"CodexBar"*) kind="background" ;;
+                *) kind="active" ;;
+            esac
+        else
+            continue
+        fi
+
+        case "$lower" in
+            *" app-server"*|*" mcp-server"*|*" exec-server"*|*".vscode/extensions/openai.chatgpt"*|*".antigravity"*|*"openai.chatgpt"*)
+                kind="background"
+                ;;
+        esac
+
+        if [ "$kind" = "active" ] && { [ "${tty:-?}" = "?" ] || [ "${tty:-??}" = "??" ]; }; then
+            kind="background"
+        fi
+
+        printf '%s\t%s\t%s\t%s\n' "$kind" "$pid" "${tty:-?}" "$command"
+    done <<< "$output"
+}
+
+active_codex_processes() {
+    codex_process_rows | awk -F '\t' '$1 == "active" { print }'
+}
+
+assert_no_active_codex() {
+    [ "${CX_ALLOW_ACTIVE_CODEX:-0}" = "1" ] && return 0
+    local active
+    active="$(active_codex_processes || true)"
+    [ -z "$active" ] && return 0
+
+    printf 'cx: refusing to switch auth while another Codex session is active\n' >&2
+    printf 'cx: run `cx ps` for details, or set CX_ALLOW_ACTIVE_CODEX=1 to override\n' >&2
+    printf '%s\n' "$active" | awk -F '\t' '{ printf "  pid=%s tty=%s command=%s\n", $2, $3, $4 }' >&2
+    exit 1
 }
 
 limit_file() {
@@ -352,6 +523,7 @@ cmd_import() {
     [ -f "$(shared_auth)" ] || die "no shared auth found at $(shared_auth)"
     mkdir -p "$(profile_dir "$name")"
     cp "$(shared_auth)" "$(profile_auth "$name")"
+    secure_auth_file "$(profile_auth "$name")"
     set_current_profile "$name"
     printf 'imported current auth as profile: %s\n' "$name"
 }
@@ -363,6 +535,7 @@ cmd_login() {
 
     ensure_dirs
     acquire_lock
+    assert_no_active_codex
     save_active_auth_if_known
 
     local backup=""
@@ -404,6 +577,7 @@ cmd_use() {
     [ -n "$name" ] || die "usage: cx use <name>"
     ensure_dirs
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
+    assert_no_active_codex
     save_active_auth_if_known
     stage_profile_auth "$name"
     set_current_profile "$name"
@@ -419,10 +593,10 @@ cmd_current() {
 
 cmd_list() {
     ensure_dirs
-    local current name dir mark login limit
+    local current name dir mark login limit meta mode email plan account_id expires_at
     current="$(current_profile)"
 
-    printf '%-8s %-24s %-10s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'LIMIT'
+    printf '%-8s %-24s %-10s %-28s %-10s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'LIMIT'
     for dir in "$CX_PROFILES_DIR"/*; do
         [ -d "$dir" ] || continue
         [ "$(basename "$dir")" = ".lock" ] && continue
@@ -431,8 +605,34 @@ cmd_list() {
         [ "$name" = "$current" ] && mark="*"
         login="$(auth_state "$name")"
         limit="$(limit_status "$name")"
-        printf '%-8s %-24s %-10s %s\n' "$mark" "$name" "$login" "$limit"
+        meta="$(profile_metadata "$name")"
+        IFS=$'\t' read -r mode email plan account_id expires_at <<< "$meta"
+        printf '%-8s %-24s %-10s %-28s %-10s %s\n' "$mark" "$name" "$login" "$(mask_email "${email:-}")" "${plan:--}" "$limit"
     done | sort -k2
+}
+
+cmd_info() {
+    local name="${1:-}"
+    [ -n "$name" ] || name="$(require_current_profile)"
+    ensure_dirs
+
+    local current login limit meta mode email plan account_id expires_at
+    current="$(current_profile)"
+    login="$(auth_state "$name")"
+    limit="$(limit_status "$name")"
+    meta="$(profile_metadata "$name")"
+    IFS=$'\t' read -r mode email plan account_id expires_at <<< "$meta"
+
+    printf 'profile=%s\n' "$name"
+    printf 'current=%s\n' "$([ "$name" = "$current" ] && printf yes || printf no)"
+    printf 'login=%s\n' "$login"
+    printf 'auth_mode=%s\n' "${mode:--}"
+    printf 'email=%s\n' "$(mask_email "${email:-}")"
+    printf 'plan=%s\n' "${plan:--}"
+    printf 'account_id=%s\n' "$(mask_id "${account_id:-}")"
+    printf 'subscription_expires_at=%s\n' "${expires_at:--}"
+    printf 'limit=%s\n' "$limit"
+    printf 'profile_dir=%s\n' "$(profile_dir "$name")"
 }
 
 cmd_run() {
@@ -446,6 +646,7 @@ cmd_run() {
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
 
     acquire_lock
+    assert_no_active_codex
     stage_profile_auth "$name"
     codex_bin="$(find_codex_bin)"
 
@@ -479,6 +680,59 @@ cmd_ok() {
     clear_limit_if_present "$name"
 }
 
+cmd_ps() {
+    local rows
+    rows="$(codex_process_rows || true)"
+    if [ -z "$rows" ]; then
+        printf 'No Codex processes detected.\n'
+        return 0
+    fi
+
+    printf '%-12s %-8s %-10s %s\n' 'KIND' 'PID' 'TTY' 'COMMAND'
+    printf '%s\n' "$rows" | awk -F '\t' '{ printf "%-12s %-8s %-10s %s\n", $1, $2, $3, $4 }'
+}
+
+cmd_doctor() {
+    ensure_dirs
+    local current profile_count rows active_count background_count codex_bin
+    current="$(current_profile)"
+    profile_count="$(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' 2>/dev/null | wc -l | tr -d ' ')"
+    rows="$(codex_process_rows || true)"
+    active_count="$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "active" { count++ } END { print count + 0 }')"
+    background_count="$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "background" { count++ } END { print count + 0 }')"
+    codex_bin="$(find_codex_bin 2>/dev/null || true)"
+
+    printf 'codex_home=%s\n' "$CX_CODEX_HOME"
+    printf 'profiles_dir=%s\n' "$CX_PROFILES_DIR"
+    printf 'current_profile=%s\n' "${current:--}"
+    printf 'profile_count=%s\n' "$profile_count"
+    printf 'codex_bin=%s\n' "${codex_bin:--}"
+    printf 'lock=%s\n' "$([ -d "$lock_dir" ] && printf present || printf absent)"
+    printf 'active_codex_processes=%s\n' "$active_count"
+    printf 'background_codex_processes=%s\n' "$background_count"
+    printf '\n'
+    cmd_list
+}
+
+cmd_export() {
+    local dest="${1:-}"
+    [ -n "$dest" ] || die "usage: cx export <archive.tgz>"
+    ensure_dirs
+    mkdir -p "$(dirname "$dest")"
+    tar --exclude='./.lock' -czf "$dest" -C "$CX_PROFILES_DIR" .
+    chmod 600 "$dest" 2>/dev/null || true
+    printf 'exported profiles to: %s\n' "$dest"
+}
+
+cmd_restore() {
+    local src="${1:-}"
+    [ -n "$src" ] || die "usage: cx restore <archive.tgz>"
+    [ -f "$src" ] || die "archive not found: $src"
+    ensure_dirs
+    tar -xzf "$src" -C "$CX_PROFILES_DIR"
+    printf 'restored profiles from: %s\n' "$src"
+}
+
 cmd_hook_command() {
     local script_dir repo_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -495,8 +749,13 @@ main() {
         login) cmd_login "$@" ;;
         use) cmd_use "$@" ;;
         list|ls) cmd_list "$@" ;;
+        info) cmd_info "$@" ;;
         current) cmd_current "$@" ;;
         run) cmd_run "$@" ;;
+        ps) cmd_ps "$@" ;;
+        doctor) cmd_doctor "$@" ;;
+        export) cmd_export "$@" ;;
+        restore) cmd_restore "$@" ;;
         scan-limit) cmd_scan_limit "$@" ;;
         limit) cmd_limit "$@" ;;
         ok) cmd_ok "$@" ;;

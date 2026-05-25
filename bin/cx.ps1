@@ -14,9 +14,14 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
-  cx list                   List profiles, login state, and limit state
+  cx list                   List profiles, login, metadata, and limit state
+  cx info [name]            Show metadata for one profile
   cx current                Print active profile
   cx run -- [codex args]    Run codex with the active auth profile
+  cx ps                     Show Codex processes that can affect switching
+  cx doctor                 Show paths, process state, and profile summary
+  cx export <archive.tgz>   Export auth profiles to a tar.gz archive
+  cx restore <archive.tgz>  Restore auth profiles from a tar.gz archive
   cx scan-limit [name]      Scan latest Codex session and update .limit
   cx limit <name> [epoch]   Manually mark a profile as limited
   cx ok <name>              Clear a profile's limit marker
@@ -28,6 +33,7 @@ environment:
   CX_CODEX_HOME             Default: `$CODEX_HOME or ~/.codex
   CX_CODEX_BIN              Optional path to the real codex executable
   CX_LIMIT_THRESHOLD        Default: 100
+  CX_ALLOW_ACTIVE_CODEX     Set to 1 to switch even if Codex is running
 "@
 }
 
@@ -45,6 +51,10 @@ function Get-Prop($Object, [string]$Name) {
     $prop = $Object.PSObject.Properties[$Name]
     if ($prop) { return $prop.Value }
     $null
+}
+
+function Format-PlainValue($Value) {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { "-" } else { [string]$Value }
 }
 
 function Ensure-Dirs {
@@ -158,6 +168,168 @@ function Set-CurrentProfile([string]$Name) {
 
 function Get-AuthState([string]$Name) {
     if (Test-Path -LiteralPath (Get-ProfileAuth $Name)) { "ok" } else { "not-login" }
+}
+
+function Decode-Base64Url([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    $normalized = $Value.Replace("-", "+").Replace("_", "/")
+    switch ($normalized.Length % 4) {
+        0 { }
+        2 { $normalized += "==" }
+        3 { $normalized += "=" }
+        default { return $null }
+    }
+    try {
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($normalized))
+    } catch {
+        $null
+    }
+}
+
+function Decode-JwtPayload([string]$Token) {
+    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+    $parts = $Token.Split(".")
+    if ($parts.Count -ne 3) { return $null }
+    Decode-Base64Url $parts[1]
+}
+
+function Mask-Email([string]$Email) {
+    if ([string]::IsNullOrWhiteSpace($Email) -or $Email -eq "-") { return "-" }
+    if ($Email -notmatch "@") { return $Email }
+    $parts = $Email.Split("@", 2)
+    $local = $parts[0]
+    $domain = $parts[1]
+    $prefix = if ($local.Length -ge 2) { $local.Substring(0, 2) } elseif ($local.Length -eq 1) { $local } else { "" }
+    "$prefix***@$domain"
+}
+
+function Mask-Id([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -eq "-") { return "-" }
+    if ($Value.Length -le 12) { return $Value }
+    "$($Value.Substring(0, 8))...$($Value.Substring($Value.Length - 4))"
+}
+
+function Get-ProfileMetadata([string]$Name) {
+    $authPath = Get-ProfileAuth $Name
+    if (-not (Test-Path -LiteralPath $authPath)) {
+        return [PSCustomObject]@{
+            Mode = "not-login"
+            Email = "-"
+            Plan = "-"
+            AccountId = "-"
+            SubscriptionExpiresAt = "-"
+        }
+    }
+
+    try {
+        $auth = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return [PSCustomObject]@{
+            Mode = "invalid"
+            Email = "-"
+            Plan = "-"
+            AccountId = "-"
+            SubscriptionExpiresAt = "-"
+        }
+    }
+
+    $tokens = Get-Prop $auth "tokens"
+    $idToken = Get-Prop $tokens "id_token"
+    if ($idToken) {
+        $payloadText = Decode-JwtPayload ([string]$idToken)
+        $claims = $null
+        if ($payloadText) {
+            try { $claims = $payloadText | ConvertFrom-Json -ErrorAction Stop } catch { $claims = $null }
+        }
+        $authClaims = Get-Prop $claims "https://api.openai.com/auth"
+        $email = Format-PlainValue (Get-Prop $claims "email")
+        $plan = Format-PlainValue (Get-Prop $authClaims "chatgpt_plan_type")
+        $accountId = Format-PlainValue (Get-Prop $authClaims "chatgpt_account_id")
+        $expiresAt = Format-PlainValue (Get-Prop $authClaims "chatgpt_subscription_active_until")
+        return [PSCustomObject]@{
+            Mode = "chatgpt"
+            Email = $email
+            Plan = $plan
+            AccountId = $accountId
+            SubscriptionExpiresAt = $expiresAt
+        }
+    }
+
+    $apiKey = Get-Prop $auth "OPENAI_API_KEY"
+    if ($apiKey) {
+        return [PSCustomObject]@{
+            Mode = "api_key"
+            Email = "-"
+            Plan = "api_key"
+            AccountId = "-"
+            SubscriptionExpiresAt = "-"
+        }
+    }
+
+    [PSCustomObject]@{
+        Mode = "unknown"
+        Email = "-"
+        Plan = "-"
+        AccountId = "-"
+        SubscriptionExpiresAt = "-"
+    }
+}
+
+function Get-CodexProcesses {
+    $processes = @()
+    try {
+        $processes = Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { $_.Name -ieq "codex.exe" -or $_.Name -ieq "Codex.exe" }
+    } catch {
+        $processes = Get-Process -Name codex,Codex -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                [PSCustomObject]@{
+                    ProcessId = $_.Id
+                    Name = $_.Name
+                    CommandLine = $_.Path
+                }
+            }
+    }
+
+    foreach ($process in $processes) {
+        $pidValue = [int](Get-Prop $process "ProcessId")
+        if ($pidValue -eq $PID) { continue }
+        $command = [string](Get-Prop $process "CommandLine")
+        if (-not $command) { $command = [string](Get-Prop $process "Name") }
+        $lower = $command.ToLowerInvariant()
+        if ($lower.Contains("codex-auth-switcher")) { continue }
+
+        $kind = "active"
+        if ($lower.Contains(" app-server") -or
+            $lower.Contains(" mcp-server") -or
+            $lower.Contains(" exec-server") -or
+            $lower.Contains("\resources\codex.exe") -or
+            $lower.Contains(".vscode\extensions\openai.chatgpt") -or
+            $lower.Contains(".antigravity") -or
+            $lower.Contains("openai.chatgpt") -or
+            $lower.Contains("--type=")) {
+            $kind = "background"
+        }
+
+        [PSCustomObject]@{
+            Kind = $kind
+            PID = $pidValue
+            TTY = "-"
+            Command = $command
+        }
+    }
+}
+
+function Assert-NoActiveCodex {
+    if ($env:CX_ALLOW_ACTIVE_CODEX -eq "1") { return }
+    $active = @(Get-CodexProcesses | Where-Object { $_.Kind -eq "active" })
+    if ($active.Count -eq 0) { return }
+
+    [Console]::Error.WriteLine("cx: refusing to switch auth while another Codex session is active")
+    $active | ForEach-Object {
+        [Console]::Error.WriteLine(("  pid={0} command={1}" -f $_.PID, $_.Command))
+    }
+    throw "run cx ps for details, or set CX_ALLOW_ACTIVE_CODEX=1 to override"
 }
 
 function Get-LimitFile([string]$Name) {
@@ -338,6 +510,7 @@ function Cmd-Login([string[]]$Rest) {
     Ensure-Dirs
     Acquire-Lock
     try {
+        Assert-NoActiveCodex
         Save-ActiveAuthIfKnown
         $backup = $null
         $shared = Get-SharedAuth
@@ -377,6 +550,7 @@ function Cmd-Use([string[]]$Rest) {
     if (-not $name) { Die "usage: cx use <name>" }
     Ensure-Dirs
     if (-not (Test-Path -LiteralPath (Get-ProfileAuth $name))) { Die "profile has no auth.json: $name; run: cx login $name" }
+    Assert-NoActiveCodex
     Save-ActiveAuthIfKnown
     Stage-ProfileAuth $name
     Set-CurrentProfile $name
@@ -386,15 +560,35 @@ function Cmd-Use([string[]]$Rest) {
 function Cmd-List {
     Ensure-Dirs
     $current = Get-CurrentProfile
-    "{0,-8} {1,-24} {2,-10} {3}" -f "CURRENT", "PROFILE", "LOGIN", "LIMIT"
+    "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "LIMIT"
     Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne ".lock" } |
         Sort-Object Name |
         ForEach-Object {
             $name = $_.Name
             $mark = if ($name -eq $current) { "*" } else { "" }
-            "{0,-8} {1,-24} {2,-10} {3}" -f $mark, $name, (Get-AuthState $name), (Get-LimitStatus $name)
+            $meta = Get-ProfileMetadata $name
+            "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5}" -f $mark, $name, (Get-AuthState $name), (Mask-Email $meta.Email), $meta.Plan, (Get-LimitStatus $name)
         }
+}
+
+function Cmd-Info([string[]]$Rest) {
+    $name = First-Arg $Rest
+    if (-not $name) { $name = Require-CurrentProfile }
+    Ensure-Dirs
+
+    $current = Get-CurrentProfile
+    $meta = Get-ProfileMetadata $name
+    "profile=$name"
+    "current=$(if ($name -eq $current) { "yes" } else { "no" })"
+    "login=$(Get-AuthState $name)"
+    "auth_mode=$($meta.Mode)"
+    "email=$(Mask-Email $meta.Email)"
+    "plan=$($meta.Plan)"
+    "account_id=$(Mask-Id $meta.AccountId)"
+    "subscription_expires_at=$($meta.SubscriptionExpiresAt)"
+    "limit=$(Get-LimitStatus $name)"
+    "profile_dir=$(Get-ProfileDir $name)"
 }
 
 function Cmd-Run([string[]]$Rest) {
@@ -409,6 +603,7 @@ function Cmd-Run([string[]]$Rest) {
 
     Acquire-Lock
     try {
+        Assert-NoActiveCodex
         Stage-ProfileAuth $name
         $status = Invoke-CodexWithEnv $name $codexArgs
         Store-ProfileAuth $name
@@ -426,6 +621,64 @@ function Cmd-HookCommand {
     "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$hook`""
 }
 
+function Cmd-Ps {
+    $rows = @(Get-CodexProcesses)
+    if ($rows.Count -eq 0) {
+        "No Codex processes detected."
+        return
+    }
+    "{0,-12} {1,-8} {2,-10} {3}" -f "KIND", "PID", "TTY", "COMMAND"
+    $rows | Sort-Object Kind, PID | ForEach-Object {
+        "{0,-12} {1,-8} {2,-10} {3}" -f $_.Kind, $_.PID, $_.TTY, $_.Command
+    }
+}
+
+function Cmd-Doctor {
+    Ensure-Dirs
+    $current = Get-CurrentProfile
+    $profiles = @(Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne ".lock" })
+    $processes = @(Get-CodexProcesses)
+    $active = @($processes | Where-Object { $_.Kind -eq "active" })
+    $background = @($processes | Where-Object { $_.Kind -eq "background" })
+    $codexBin = try { Find-CodexBin } catch { "-" }
+
+    "codex_home=$CodexHome"
+    "profiles_dir=$ProfilesDir"
+    "current_profile=$(if ($current) { $current } else { "-" })"
+    "profile_count=$($profiles.Count)"
+    "codex_bin=$codexBin"
+    "lock=$(if (Test-Path -LiteralPath $LockDir) { "present" } else { "absent" })"
+    "active_codex_processes=$($active.Count)"
+    "background_codex_processes=$($background.Count)"
+    ""
+    Cmd-List
+}
+
+function Cmd-Export([string[]]$Rest) {
+    $dest = First-Arg $Rest
+    if (-not $dest) { Die "usage: cx export <archive.tgz>" }
+    Ensure-Dirs
+    $parent = Split-Path -Parent $dest
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    $tar = Get-Command tar -ErrorAction SilentlyContinue
+    if (-not $tar) { Die "tar is required for cx export" }
+    & $tar.Source --exclude "./.lock" -czf $dest -C $ProfilesDir .
+    if ($LASTEXITCODE -ne 0) { Die "tar export failed" }
+    "exported profiles to: $dest"
+}
+
+function Cmd-Restore([string[]]$Rest) {
+    $src = First-Arg $Rest
+    if (-not $src) { Die "usage: cx restore <archive.tgz>" }
+    if (-not (Test-Path -LiteralPath $src)) { Die "archive not found: $src" }
+    Ensure-Dirs
+    $tar = Get-Command tar -ErrorAction SilentlyContinue
+    if (-not $tar) { Die "tar is required for cx restore" }
+    & $tar.Source -xzf $src -C $ProfilesDir
+    if ($LASTEXITCODE -ne 0) { Die "tar restore failed" }
+    "restored profiles from: $src"
+}
+
 $cmd = if ($args.Count -gt 0) { $args[0] } else { "help" }
 $rest = if ($args.Count -gt 1) { @($args | Select-Object -Skip 1) } else { @() }
 
@@ -436,8 +689,13 @@ switch ($cmd) {
     "use" { Cmd-Use $rest }
     "list" { Cmd-List }
     "ls" { Cmd-List }
+    "info" { Cmd-Info $rest }
     "current" { $name = Get-CurrentProfile; if (-not $name) { Die "no active profile" }; $name }
     "run" { Cmd-Run $rest }
+    "ps" { Cmd-Ps }
+    "doctor" { Cmd-Doctor }
+    "export" { Cmd-Export $rest }
+    "restore" { Cmd-Restore $rest }
     "scan-limit" {
         Ensure-Dirs
         $name = if ($rest.Count -gt 0 -and $rest[0]) { $rest[0] } else { Require-CurrentProfile }
