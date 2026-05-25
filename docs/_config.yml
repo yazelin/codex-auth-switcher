@@ -1,0 +1,5 @@
+title: Codex Auth Switcher
+description: Manage multiple Codex ChatGPT accounts on one machine — Windows, Linux, and macOS
+remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+  - jekyll-remote-theme

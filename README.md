@@ -1,5 +1,28 @@
 # Codex Auth Switcher
 
+Manage multiple Codex ChatGPT auth profiles on one machine.  
+Switch accounts instantly without re-logging in. Works on **Windows**, **Linux**, and **macOS**.
+
+**[Full guide → yazelin.github.io/codex-auth-switcher](https://yazelin.github.io/codex-auth-switcher/)**
+
+## Quick Install
+
+**Windows PowerShell** — open any PowerShell window and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex
+```
+
+**Linux / macOS** — open any bash or zsh terminal and paste:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)
+```
+
+The installer clones the repo, wires up your shell profile, and prints a first-time setup guide.
+
+---
+
 Small shell tooling for managing multiple Codex ChatGPT auth identities on one computer while keeping one shared Codex home.
 
 The design intentionally shares all Codex context:
@@ -74,7 +97,9 @@ Profile names are arbitrary. `work`, `personal`, `team-a`, `backup`, or a teamma
 
 ## Install
 
-### Linux / macOS
+See **[Quick Install](#quick-install)** above for the one-liner commands.
+
+### Manual Install — Linux / macOS
 
 Clone this repo, then run from the repo root:
 
@@ -94,27 +119,15 @@ Reload your shell:
 source ~/.bashrc
 ```
 
-### Windows PowerShell
+### Manual Install — Windows PowerShell
 
-Clone this repo, then add this to your PowerShell profile:
-
-```powershell
-. "$HOME\codex-auth-switcher\shell\powershell.ps1"
-```
-
-You can print your profile path with:
-
-```powershell
-$PROFILE
-```
-
-Or let the installer append the source line:
+Clone this repo, then run the installer to append the source line to your profile:
 
 ```powershell
 .\install.ps1 -UpdateProfile
 ```
 
-Then reload PowerShell or dot-source the profile:
+Then reload the profile:
 
 ```powershell
 . $PROFILE
@@ -164,6 +177,8 @@ codex
 Linux/macOS and Windows use the same commands:
 
 ```bash
+cx switch               # interactive profile switcher — kills Codex first
+cx kill                 # kill all active Codex processes
 cx list
 cx info <name>
 cx use <name>
@@ -346,14 +361,29 @@ To override the process guard:
 
 ```bash
 CX_ALLOW_ACTIVE_CODEX=1 cx use <name>
+CX_ALLOW_ACTIVE_CODEX=1 cx login <name>
 ```
 
-PowerShell:
+PowerShell — set the variable then run the command on the same line with `;`:
+
+```powershell
+$env:CX_ALLOW_ACTIVE_CODEX = "1"; cx use <name>
+$env:CX_ALLOW_ACTIVE_CODEX = "1"; cx login <name>
+```
+
+Or across two lines if you prefer:
 
 ```powershell
 $env:CX_ALLOW_ACTIVE_CODEX = "1"
 cx use <name>
 ```
+
+> **PowerShell 5.1 pitfalls** — the following bash-style patterns do not work and will error:
+> - `CX_ALLOW_ACTIVE_CODEX=1 cx login <name>` — inline env prefix is not valid PowerShell syntax
+> - `set CX_ALLOW_ACTIVE_CODEX=1 && cx login <name>` — `&&` is not supported in PowerShell 5.1
+> - `set CX_ALLOW_ACTIVE_CODEX=1 | cx login <name>` — `set` (`Set-Variable`) piped to a command does nothing useful
+>
+> Always use `$env:VAR = "value"; command` in PowerShell.
 
 ## Export And Restore
 

@@ -14,6 +14,8 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
+  cx switch                 Interactive profile switcher (kills Codex first)
+  cx kill                   Kill all active Codex processes
   cx remove <name>          Remove a saved auth profile
   cx list                   List profiles, login, metadata, and limit state
   cx info [name]            Show metadata for one profile
@@ -607,10 +609,18 @@ function Cmd-Info([string[]]$Rest) {
 }
 
 function Cmd-Run([string[]]$Rest) {
-    $codexArgs = @($Rest)
-    if ($codexArgs.Count -gt 0 -and $codexArgs[0] -eq "--") {
-        $codexArgs = @($codexArgs | Select-Object -Skip 1)
+    # PS5.1 strict-mode quirk: if/else expressions with null [string[]] propagate null.
+    # Use ArrayList + two-step assignment to reliably strip the "--" separator.
+    $cxArgList = [System.Collections.ArrayList]::new()
+    if ($null -ne $Rest) {
+        [bool]$sawSep = $false
+        foreach ($item in $Rest) {
+            if (-not $sawSep -and [string]$item -eq "--") { $sawSep = $true; continue }
+            [void]$cxArgList.Add([string]$item)
+        }
     }
+    [string[]]$codexArgs = [string[]]::new(0)
+    if ($cxArgList.Count -gt 0) { [string[]]$codexArgs = $cxArgList.ToArray() }
 
     Ensure-Dirs
     $name = Require-CurrentProfile
@@ -646,6 +656,126 @@ function Cmd-Ps {
     $rows | Sort-Object Kind, PID | ForEach-Object {
         "{0,-12} {1,-8} {2,-10} {3}" -f $_.Kind, $_.PID, $_.TTY, $_.Command
     }
+}
+
+function Kill-AllCodex {
+    $activePids = @(
+        Get-CodexProcesses |
+        Where-Object { $_.Kind -eq "active" } |
+        ForEach-Object { [string]$_.PID }
+    )
+    if ($activePids.Count -eq 0) { return 0 }
+    foreach ($pidStr in $activePids) {
+        try { Stop-Process -Id ([int]$pidStr) -Force -ErrorAction Stop }
+        catch { Write-Warning "cx: could not kill pid ${pidStr}: $_" }
+    }
+    Start-Sleep -Milliseconds 500
+    return $activePids.Count
+}
+
+function Cmd-Kill {
+    [int]$killed = Kill-AllCodex
+    if ($killed -eq 0) { "No active Codex processes found." }
+    else { "Killed $killed active Codex process(es)." }
+}
+
+function Cmd-Switch {
+    Ensure-Dirs
+    $current = Get-CurrentProfile
+
+    $profileNames = @(
+        Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne ".lock" } |
+        Sort-Object Name |
+        ForEach-Object { $_.Name }
+    )
+
+    if ($profileNames.Count -eq 0) { Die "no profiles found; run: cx import <name>" }
+
+    $selectedIdx = 0
+    for ($i = 0; $i -lt $profileNames.Count; $i++) {
+        if ($profileNames[$i] -eq $current) { $selectedIdx = $i; break }
+    }
+
+    $rows = @(foreach ($pname in $profileNames) {
+        [PSCustomObject]@{
+            Name  = $pname
+            Mark  = if ($pname -eq $current) { "*" } else { " " }
+            Auth  = Get-AuthState $pname
+            Limit = Get-LimitStatus $pname
+        }
+    })
+
+    $drawMenu = {
+        param([int]$Sel)
+        [Console]::SetCursorPosition(0, $menuTop)
+        $title = "  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)"
+        Write-Host $title -ForegroundColor Cyan
+        Write-Host ("  " + [string]("-" * ($title.Length - 2))) -ForegroundColor DarkGray
+        for ($i = 0; $i -lt $rows.Count; $i++) {
+            $r = $rows[$i]
+            $limitStr = if ($r.Limit -eq "-") { "" } else { "  !$($r.Limit)" }
+            $line = ("  {0} {1,-20} {2,-8}{3}" -f $r.Mark, $r.Name, $r.Auth, $limitStr).PadRight(72)
+            if ($i -eq $Sel) {
+                Write-Host $line -BackgroundColor DarkCyan -ForegroundColor White
+            } else {
+                Write-Host $line
+            }
+        }
+        Write-Host ""
+    }
+
+    [Console]::CursorVisible = $false
+    [int]$totalLines = $rows.Count + 3
+    for ($i = 0; $i -lt $totalLines; $i++) { Write-Host "" }
+    [int]$menuTop = [Console]::CursorTop - $totalLines
+
+    $chosen    = $null
+    $cancelled = $false
+
+    try {
+        & $drawMenu $selectedIdx
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq [ConsoleKey]::UpArrow -and $selectedIdx -gt 0) {
+                $selectedIdx--; & $drawMenu $selectedIdx
+            } elseif ($key.Key -eq [ConsoleKey]::DownArrow -and $selectedIdx -lt ($rows.Count - 1)) {
+                $selectedIdx++; & $drawMenu $selectedIdx
+            } elseif ($key.Key -eq [ConsoleKey]::Enter) {
+                $chosen = $profileNames[$selectedIdx]; break
+            } elseif ($key.Key -eq [ConsoleKey]::Escape) {
+                $cancelled = $true; break
+            }
+        }
+    } finally {
+        [Console]::CursorVisible = $true
+        [Console]::SetCursorPosition(0, $menuTop + $totalLines)
+    }
+
+    if ($cancelled) { "cancelled."; return }
+    if ($chosen -eq $current) { "already on: $chosen"; return }
+
+    $activePids = @(
+        Get-CodexProcesses |
+        Where-Object { $_.Kind -eq "active" } |
+        ForEach-Object { [string]$_.PID }
+    )
+    if ($activePids.Count -gt 0) {
+        "Killing $($activePids.Count) active Codex process(es)..."
+        foreach ($pidStr in $activePids) {
+            try { Stop-Process -Id ([int]$pidStr) -Force -ErrorAction Stop }
+            catch { Write-Warning "cx: could not kill pid ${pidStr}" }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not (Test-Path -LiteralPath (Get-ProfileAuth $chosen))) {
+        Die "profile has no auth.json: $chosen; run: cx login $chosen"
+    }
+    Save-ActiveAuthIfKnown
+    Stage-ProfileAuth $chosen
+    Set-CurrentProfile $chosen
+    "switched to: $chosen"
 }
 
 function Cmd-Doctor {
@@ -702,6 +832,8 @@ switch ($cmd) {
     "init" { Cmd-Import $rest }
     "login" { Cmd-Login $rest }
     "use" { Cmd-Use $rest }
+    "switch" { Cmd-Switch }
+    "kill" { Cmd-Kill }
     "remove" { Cmd-Remove $rest }
     "rm" { Cmd-Remove $rest }
     "delete" { Cmd-Remove $rest }
