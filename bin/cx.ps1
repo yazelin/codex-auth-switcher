@@ -14,6 +14,7 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
+  cx remove <name>          Remove a saved auth profile
   cx list                   List profiles, login, metadata, and limit state
   cx info [name]            Show metadata for one profile
   cx current                Print active profile
@@ -557,6 +558,20 @@ function Cmd-Use([string[]]$Rest) {
     "current: $name"
 }
 
+function Cmd-Remove([string[]]$Rest) {
+    $name = First-Arg $Rest
+    if (-not $name) { Die "usage: cx remove <name>" }
+    Ensure-Dirs
+
+    $current = Get-CurrentProfile
+    if ($name -eq $current) { Die "cannot remove active profile: $name; run: cx use <other> first" }
+
+    $dir = Get-ProfileDir $name
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Die "profile not found: $name" }
+    Remove-Item -LiteralPath $dir -Recurse -Force
+    "removed profile: $name"
+}
+
 function Cmd-List {
     Ensure-Dirs
     $current = Get-CurrentProfile
@@ -687,6 +702,9 @@ switch ($cmd) {
     "init" { Cmd-Import $rest }
     "login" { Cmd-Login $rest }
     "use" { Cmd-Use $rest }
+    "remove" { Cmd-Remove $rest }
+    "rm" { Cmd-Remove $rest }
+    "delete" { Cmd-Remove $rest }
     "list" { Cmd-List }
     "ls" { Cmd-List }
     "info" { Cmd-Info $rest }

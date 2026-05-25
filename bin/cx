@@ -19,6 +19,7 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
+  cx remove <name>          Remove a saved auth profile
   cx list                   List profiles, login, metadata, and limit state
   cx info [name]            Show metadata for one profile
   cx current                Print active profile
@@ -584,6 +585,21 @@ cmd_use() {
     printf 'current: %s\n' "$name"
 }
 
+cmd_remove() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "usage: cx remove <name>"
+    ensure_dirs
+
+    local current dir
+    current="$(current_profile)"
+    [ "$name" != "$current" ] || die "cannot remove active profile: $name; run: cx use <other> first"
+
+    dir="$(profile_dir "$name")"
+    [ -d "$dir" ] || die "profile not found: $name"
+    rm -rf -- "$dir"
+    printf 'removed profile: %s\n' "$name"
+}
+
 cmd_current() {
     local name
     name="$(current_profile)"
@@ -748,6 +764,7 @@ main() {
         import|init) cmd_import "$@" ;;
         login) cmd_login "$@" ;;
         use) cmd_use "$@" ;;
+        remove|rm|delete) cmd_remove "$@" ;;
         list|ls) cmd_list "$@" ;;
         info) cmd_info "$@" ;;
         current) cmd_current "$@" ;;

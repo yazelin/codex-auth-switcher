@@ -167,6 +167,7 @@ Linux/macOS and Windows use the same commands:
 cx list
 cx info <name>
 cx use <name>
+cx remove <name>
 cx login <name>
 cx ps
 cx doctor
@@ -200,6 +201,19 @@ account_id=acc_1234...cdef
 subscription_expires_at=2026-04-23T05:03:38+00:00
 limit=-
 profile_dir=/home/me/.codex_auth_profiles/main
+```
+
+`cx remove <name>` deletes a saved auth profile directory:
+
+```bash
+cx remove old-profile
+```
+
+For safety, it refuses to remove the currently active profile. Switch to another profile first:
+
+```bash
+cx use main
+cx remove old-profile
 ```
 
 ## Limit Tracking
