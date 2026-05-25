@@ -1,0 +1,509 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CX_PROFILES_DIR="${CX_PROFILES_DIR:-$HOME/.codex_auth_profiles}"
+CX_CODEX_HOME="${CX_CODEX_HOME:-${CODEX_HOME:-$HOME/.codex}}"
+CX_LIMIT_THRESHOLD="${CX_LIMIT_THRESHOLD:-100}"
+
+current_file="$CX_PROFILES_DIR/current"
+lock_dir="$CX_PROFILES_DIR/.lock"
+
+die() {
+    printf 'cx: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<'EOF'
+usage:
+  cx import <name>          Save current ~/.codex/auth.json as a profile
+  cx login <name> [args]    Login or refresh a profile
+  cx use <name>             Switch active auth profile
+  cx list                   List profiles, login state, and limit state
+  cx current                Print active profile
+  cx run -- [codex args]    Run codex with the active auth profile
+  cx scan-limit [name]      Scan latest Codex session and update .limit
+  cx limit <name> [epoch]   Manually mark a profile as limited
+  cx ok <name>              Clear a profile's limit marker
+  cx hook-command           Print the Stop hook command
+  cx help                   Show this help
+
+environment:
+  CX_PROFILES_DIR           Default: ~/.codex_auth_profiles
+  CX_CODEX_HOME             Default: $CODEX_HOME or ~/.codex
+  CX_CODEX_BIN              Optional path to the real codex executable
+  CX_LIMIT_THRESHOLD        Default: 100
+EOF
+}
+
+ensure_dirs() {
+    mkdir -p "$CX_PROFILES_DIR" "$CX_CODEX_HOME"
+}
+
+profile_dir() {
+    local name="$1"
+    [ -n "$name" ] || die "profile name is required"
+    case "$name" in
+        */*|.*|'') die "invalid profile name: $name" ;;
+    esac
+    printf '%s/%s\n' "$CX_PROFILES_DIR" "$name"
+}
+
+shared_auth() {
+    printf '%s/auth.json\n' "$CX_CODEX_HOME"
+}
+
+profile_auth() {
+    printf '%s/auth.json\n' "$(profile_dir "$1")"
+}
+
+current_profile() {
+    if [ -f "$current_file" ]; then
+        sed -n '1p' "$current_file"
+    fi
+}
+
+require_current_profile() {
+    local name
+    name="$(current_profile)"
+    [ -n "$name" ] || die "no active profile; run: cx use <name> or cx import <name>"
+    printf '%s\n' "$name"
+}
+
+format_epoch() {
+    local epoch="$1"
+    [ -n "$epoch" ] || return 1
+    date -d "@$epoch" '+%Y-%m-%d %H:%M' 2>/dev/null ||
+        date -r "$epoch" '+%Y-%m-%d %H:%M' 2>/dev/null ||
+        printf '%s\n' "$epoch"
+}
+
+now_epoch() {
+    date +%s
+}
+
+acquire_lock() {
+    ensure_dirs
+    if mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s\n' "$$" > "$lock_dir/pid"
+        trap 'release_lock' EXIT INT TERM
+        return 0
+    fi
+
+    local pid
+    pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    die "another cx-managed codex process is running${pid:+ (pid $pid)}"
+}
+
+release_lock() {
+    if [ -d "$lock_dir" ] && [ "$(cat "$lock_dir/pid" 2>/dev/null || true)" = "$$" ]; then
+        rm -rf "$lock_dir"
+    fi
+}
+
+find_codex_bin() {
+    if [ -n "${CX_CODEX_BIN:-}" ]; then
+        [ -x "$CX_CODEX_BIN" ] || die "CX_CODEX_BIN is not executable: $CX_CODEX_BIN"
+        printf '%s\n' "$CX_CODEX_BIN"
+        return 0
+    fi
+
+    local path
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [ -x "$path" ] || continue
+        printf '%s\n' "$path"
+        return 0
+    done < <(type -P -a codex 2>/dev/null || true)
+
+    die "codex executable not found; set CX_CODEX_BIN=/path/to/codex"
+}
+
+save_active_auth_if_known() {
+    local name
+    name="$(current_profile)"
+    [ -n "$name" ] || return 0
+    [ -f "$(shared_auth)" ] || return 0
+    mkdir -p "$(profile_dir "$name")"
+    cp "$(shared_auth)" "$(profile_auth "$name")"
+}
+
+stage_profile_auth() {
+    local name="$1"
+    local auth
+    auth="$(profile_auth "$name")"
+    [ -f "$auth" ] || die "profile has no auth.json: $name; run: cx login $name"
+    cp "$auth" "$(shared_auth)"
+}
+
+store_profile_auth() {
+    local name="$1"
+    [ -f "$(shared_auth)" ] || return 0
+    mkdir -p "$(profile_dir "$name")"
+    cp "$(shared_auth)" "$(profile_auth "$name")"
+}
+
+set_current_profile() {
+    local name="$1"
+    mkdir -p "$(profile_dir "$name")"
+    printf '%s\n' "$name" > "$current_file"
+}
+
+auth_state() {
+    local name="$1"
+    if [ -f "$(profile_auth "$name")" ]; then
+        printf 'ok\n'
+    else
+        printf 'not-login\n'
+    fi
+}
+
+limit_file() {
+    printf '%s/.limit\n' "$(profile_dir "$1")"
+}
+
+read_limit_value() {
+    local file="$1"
+    local key="$2"
+    sed -n "s/^${key}=//p" "$file" 2>/dev/null | sed -n '1p'
+}
+
+limit_status() {
+    local name="$1"
+    local file reset_at now label
+    file="$(limit_file "$name")"
+
+    [ -f "$file" ] || {
+        printf -- '-\n'
+        return 0
+    }
+
+    reset_at="$(read_limit_value "$file" reset_at)"
+    now="$(now_epoch)"
+
+    if [ -n "$reset_at" ] && [ "$reset_at" -eq "$reset_at" ] 2>/dev/null && [ "$now" -ge "$reset_at" ]; then
+        rm -f "$file"
+        printf -- '-\n'
+        return 0
+    fi
+
+    label="$(read_limit_value "$file" label)"
+    if [ -n "$label" ]; then
+        printf '%s\n' "$label"
+    elif [ -n "$reset_at" ]; then
+        printf 'hit until %s\n' "$(format_epoch "$reset_at")"
+    else
+        printf 'hit unknown\n'
+    fi
+}
+
+write_limit() {
+    local name="$1"
+    local type="${2:-unknown}"
+    local reset_at="${3:-}"
+    local source="${4:-manual}"
+    local file hit_at label
+
+    mkdir -p "$(profile_dir "$name")"
+    file="$(limit_file "$name")"
+    hit_at="$(now_epoch)"
+
+    if [ -n "$reset_at" ]; then
+        label="hit until $(format_epoch "$reset_at")"
+    else
+        label="hit unknown"
+    fi
+
+    {
+        printf 'hit_at=%s\n' "$hit_at"
+        [ -n "$reset_at" ] && printf 'reset_at=%s\n' "$reset_at"
+        printf 'type=%s\n' "$type"
+        printf 'source=%s\n' "$source"
+        printf 'label=%s\n' "$label"
+    } > "$file"
+}
+
+clear_limit_if_present() {
+    local name="$1"
+    rm -f "$(limit_file "$name")"
+}
+
+latest_session_file() {
+    local dir="$CX_CODEX_HOME/sessions"
+    [ -d "$dir" ] || return 1
+
+    local latest
+    latest="$(find "$dir" -type f -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null |
+        sort -nr |
+        sed -n '1s/^[^ ]* //p')"
+    if [ -n "$latest" ]; then
+        printf '%s\n' "$latest"
+        return 0
+    fi
+
+    find "$dir" -type f -name '*.jsonl' -exec ls -t {} + 2>/dev/null | sed -n '1p'
+}
+
+ge_number() {
+    awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN { exit !(a >= b) }'
+}
+
+max_epoch() {
+    local a="${1:-}" b="${2:-}"
+    if [ -z "$a" ]; then
+        printf '%s\n' "$b"
+    elif [ -z "$b" ]; then
+        printf '%s\n' "$a"
+    elif [ "$a" -ge "$b" ] 2>/dev/null; then
+        printf '%s\n' "$a"
+    else
+        printf '%s\n' "$b"
+    fi
+}
+
+parse_rate_limits_with_jq() {
+    local file="$1"
+    command -v jq >/dev/null 2>&1 || return 1
+    jq -r '
+        select(.type == "event_msg") |
+        (.rate_limits // .payload.rate_limits // empty) |
+        [
+            (.rate_limit_reached_type // ""),
+            (.primary.used_percent // 0),
+            (.primary.resets_at // ""),
+            (.secondary.used_percent // 0),
+            (.secondary.resets_at // ""),
+            (.plan_type // "")
+        ] | @tsv
+    ' "$file" 2>/dev/null | sed -n '$p'
+}
+
+parse_rate_limits_fallback() {
+    local file="$1"
+    local line reached primary_used primary_reset secondary_used secondary_reset plan
+    line="$(grep '"rate_limits"' "$file" 2>/dev/null | tail -n 1 || true)"
+    [ -n "$line" ] || return 1
+
+    reached="$(printf '%s\n' "$line" | sed -n 's/.*"rate_limit_reached_type":\([^,}]*\).*/\1/p' | tr -d '"')"
+    [ "$reached" = "null" ] && reached=""
+    primary_used="$(printf '%s\n' "$line" | sed -n 's/.*"primary":{[^}]*"used_percent":\([0-9.]*\).*/\1/p')"
+    primary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"primary":{[^}]*"resets_at":\([0-9]*\).*/\1/p')"
+    secondary_used="$(printf '%s\n' "$line" | sed -n 's/.*"secondary":{[^}]*"used_percent":\([0-9.]*\).*/\1/p')"
+    secondary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"secondary":{[^}]*"resets_at":\([0-9]*\).*/\1/p')"
+    plan="$(printf '%s\n' "$line" | sed -n 's/.*"plan_type":"\([^"]*\)".*/\1/p')"
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${reached:-}" "${primary_used:-0}" "${primary_reset:-}" "${secondary_used:-0}" "${secondary_reset:-}" "${plan:-}"
+}
+
+scan_limit_for_profile() {
+    local name="$1"
+    local session record reached primary_used primary_reset secondary_used secondary_reset plan
+    local hit_type="" reset_at=""
+
+    session="$(latest_session_file || true)"
+    [ -n "$session" ] || return 0
+
+    record="$(parse_rate_limits_with_jq "$session" || parse_rate_limits_fallback "$session" || true)"
+    [ -n "$record" ] || return 0
+
+    IFS=$'\t' read -r reached primary_used primary_reset secondary_used secondary_reset plan <<< "$record"
+
+    case "$reached" in
+        primary)
+            hit_type="primary"
+            reset_at="$primary_reset"
+            ;;
+        secondary)
+            hit_type="secondary"
+            reset_at="$secondary_reset"
+            ;;
+        ""|null)
+            if ge_number "$secondary_used" "$CX_LIMIT_THRESHOLD"; then
+                hit_type="secondary"
+                reset_at="$secondary_reset"
+            fi
+            if ge_number "$primary_used" "$CX_LIMIT_THRESHOLD"; then
+                if [ -n "$hit_type" ]; then
+                    hit_type="primary+secondary"
+                    reset_at="$(max_epoch "$reset_at" "$primary_reset")"
+                else
+                    hit_type="primary"
+                    reset_at="$primary_reset"
+                fi
+            fi
+            ;;
+        *)
+            hit_type="$reached"
+            reset_at="$(max_epoch "$primary_reset" "$secondary_reset")"
+            ;;
+    esac
+
+    if [ -n "$hit_type" ]; then
+        write_limit "$name" "$hit_type" "$reset_at" "session-scan"
+    else
+        clear_limit_if_present "$name"
+    fi
+}
+
+cmd_import() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "usage: cx import <name>"
+    ensure_dirs
+    [ -f "$(shared_auth)" ] || die "no shared auth found at $(shared_auth)"
+    mkdir -p "$(profile_dir "$name")"
+    cp "$(shared_auth)" "$(profile_auth "$name")"
+    set_current_profile "$name"
+    printf 'imported current auth as profile: %s\n' "$name"
+}
+
+cmd_login() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "usage: cx login <name> [codex login args]"
+    shift || true
+
+    ensure_dirs
+    acquire_lock
+    save_active_auth_if_known
+
+    local backup=""
+    if [ -f "$(shared_auth)" ]; then
+        backup="$(shared_auth).cx-login-backup.$$"
+        cp "$(shared_auth)" "$backup"
+    fi
+
+    if [ -f "$(profile_auth "$name")" ]; then
+        stage_profile_auth "$name"
+    else
+        rm -f "$(shared_auth)"
+    fi
+
+    local codex_bin status
+    codex_bin="$(find_codex_bin)"
+    set +e
+    CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" login "$@"
+    status=$?
+    set -e
+
+    if [ "$status" -eq 0 ] && [ -f "$(shared_auth)" ]; then
+        store_profile_auth "$name"
+        set_current_profile "$name"
+        rm -f "$backup"
+        printf 'current: %s\n' "$name"
+        return 0
+    fi
+
+    if [ -n "$backup" ] && [ -f "$backup" ]; then
+        cp "$backup" "$(shared_auth)"
+        rm -f "$backup"
+    fi
+    return "$status"
+}
+
+cmd_use() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "usage: cx use <name>"
+    ensure_dirs
+    [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
+    save_active_auth_if_known
+    stage_profile_auth "$name"
+    set_current_profile "$name"
+    printf 'current: %s\n' "$name"
+}
+
+cmd_current() {
+    local name
+    name="$(current_profile)"
+    [ -n "$name" ] || die "no active profile"
+    printf '%s\n' "$name"
+}
+
+cmd_list() {
+    ensure_dirs
+    local current name dir mark login limit
+    current="$(current_profile)"
+
+    printf '%-8s %-24s %-10s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'LIMIT'
+    for dir in "$CX_PROFILES_DIR"/*; do
+        [ -d "$dir" ] || continue
+        [ "$(basename "$dir")" = ".lock" ] && continue
+        name="$(basename "$dir")"
+        mark=""
+        [ "$name" = "$current" ] && mark="*"
+        login="$(auth_state "$name")"
+        limit="$(limit_status "$name")"
+        printf '%-8s %-24s %-10s %s\n' "$mark" "$name" "$login" "$limit"
+    done | sort -k2
+}
+
+cmd_run() {
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
+
+    ensure_dirs
+    local name codex_bin status
+    name="$(require_current_profile)"
+    [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
+
+    acquire_lock
+    stage_profile_auth "$name"
+    codex_bin="$(find_codex_bin)"
+
+    set +e
+    CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
+    status=$?
+    set -e
+
+    store_profile_auth "$name"
+    scan_limit_for_profile "$name" || true
+    return "$status"
+}
+
+cmd_scan_limit() {
+    local name="${1:-}"
+    ensure_dirs
+    [ -n "$name" ] || name="$(require_current_profile)"
+    scan_limit_for_profile "$name"
+}
+
+cmd_limit() {
+    local name="${1:-}"
+    local reset_at="${2:-}"
+    [ -n "$name" ] || die "usage: cx limit <name> [reset_epoch]"
+    write_limit "$name" "manual" "$reset_at" "manual"
+}
+
+cmd_ok() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "usage: cx ok <name>"
+    clear_limit_if_present "$name"
+}
+
+cmd_hook_command() {
+    local script_dir repo_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    repo_dir="$(cd "$script_dir/.." && pwd)"
+    printf '"%s/hooks/codex-limit-hook"\n' "$repo_dir"
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        import|init) cmd_import "$@" ;;
+        login) cmd_login "$@" ;;
+        use) cmd_use "$@" ;;
+        list|ls) cmd_list "$@" ;;
+        current) cmd_current "$@" ;;
+        run) cmd_run "$@" ;;
+        scan-limit) cmd_scan_limit "$@" ;;
+        limit) cmd_limit "$@" ;;
+        ok) cmd_ok "$@" ;;
+        hook-command) cmd_hook_command "$@" ;;
+        help|-h|--help) usage ;;
+        *) usage >&2; exit 2 ;;
+    esac
+}
+
+main "$@"
