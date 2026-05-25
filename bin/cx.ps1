@@ -392,33 +392,35 @@ function Clear-Limit([string]$Name) {
 }
 
 function Get-LatestSessionFile {
+    param([datetime]$After = [datetime]::MinValue)
     $sessionDir = Join-Path $CodexHome "sessions"
     if (-not (Test-Path -LiteralPath $sessionDir)) { return $null }
     Get-ChildItem -LiteralPath $sessionDir -Recurse -Filter "*.jsonl" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTimeUtc -gt $After.ToUniversalTime() } |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1 -ExpandProperty FullName
 }
 
 function Get-LastRateLimitRecord([string]$SessionFile) {
     if (-not $SessionFile) { return $null }
-    $lastLine = $null
-    foreach ($line in Get-Content -LiteralPath $SessionFile -ErrorAction SilentlyContinue) {
-        if ($line -like '*"rate_limits"*') {
-            $lastLine = $line
-        }
+    # Read from the tail — rate_limits always appears in the last token_count event
+    $lines = Get-Content -LiteralPath $SessionFile -ErrorAction SilentlyContinue
+    if (-not $lines) { return $null }
+    $total = $lines.Count
+    $limit = [Math]::Max(0, $total - 80)
+    for ($i = $total - 1; $i -ge $limit; $i--) {
+        if ($lines[$i] -notlike '*"rate_limits"*') { continue }
+        try {
+            $obj = $lines[$i] | ConvertFrom-Json -ErrorAction Stop
+            $rate = Get-Prop $obj "rate_limits"
+            if (-not $rate) {
+                $payload = Get-Prop $obj "payload"
+                $rate = Get-Prop $payload "rate_limits"
+            }
+            if ($rate) { return $rate }
+        } catch { }
     }
-    if (-not $lastLine) { return $null }
-
-    try {
-        $obj = $lastLine | ConvertFrom-Json -ErrorAction Stop
-        $rate = Get-Prop $obj "rate_limits"
-        if ($rate) { return $rate }
-        $payload = Get-Prop $obj "payload"
-        $rate = Get-Prop $payload "rate_limits"
-        if ($rate) { return $rate }
-    } catch {
-        return $null
-    }
+    return $null
 }
 
 function Max-Epoch([string]$A, [string]$B) {
@@ -427,8 +429,8 @@ function Max-Epoch([string]$A, [string]$B) {
     if ([int64]$A -ge [int64]$B) { $A } else { $B }
 }
 
-function Scan-LimitForProfile([string]$Name) {
-    $session = Get-LatestSessionFile
+function Scan-LimitForProfile([string]$Name, [datetime]$After = [datetime]::MinValue) {
+    $session = Get-LatestSessionFile -After $After
     $rate = Get-LastRateLimitRecord $session
     if (-not $rate) { return }
 
@@ -630,9 +632,10 @@ function Cmd-Run([string[]]$Rest) {
     try {
         Assert-NoActiveCodex
         Stage-ProfileAuth $name
+        $runStart = [datetime]::UtcNow
         $status = Invoke-CodexWithEnv $name $codexArgs
         Store-ProfileAuth $name
-        Scan-LimitForProfile $name
+        Scan-LimitForProfile $name $runStart
         $global:LASTEXITCODE = $status
     } finally {
         Release-Lock
