@@ -36,7 +36,7 @@
   /* ── Nav ── */
   nav {
     position: sticky; top: 0; z-index: 100;
-    background: rgba(15,15,26,.92);
+    background: rgba(15,15,26,.95);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
     padding: 0 2rem;
@@ -46,7 +46,6 @@
   .nav-brand {
     font-weight: 700; font-size: 1rem;
     color: var(--text); text-decoration: none;
-    display: flex; align-items: center; gap: .5rem;
   }
   .nav-brand span { color: var(--blue-light); }
   .nav-links { display: flex; gap: 1.5rem; }
@@ -73,13 +72,13 @@
     letter-spacing: .04em; text-transform: uppercase;
   }
   h1 {
-    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-size: clamp(1.8rem, 5vw, 3.2rem);
     font-weight: 800; line-height: 1.15;
     margin-bottom: 1rem; letter-spacing: -.02em;
   }
   h1 em { font-style: normal; color: var(--blue-light); }
   .hero-sub {
-    font-size: clamp(.95rem, 2vw, 1.15rem);
+    font-size: clamp(.9rem, 2vw, 1.15rem);
     color: var(--text-dim); max-width: 560px; margin: 0 auto 2.5rem;
   }
   .hero-note {
@@ -117,8 +116,9 @@
     display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid var(--border);
     font-size: .75rem; color: var(--text-dim);
+    gap: .75rem;
   }
-  .dots { display: flex; gap: 6px; }
+  .dots { display: flex; gap: 6px; flex-shrink: 0; }
   .dots span {
     width: 12px; height: 12px; border-radius: 50%;
     background: var(--border);
@@ -131,16 +131,17 @@
     font-family: "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: .875rem; color: #e6edf3; line-height: 1.7;
     white-space: pre-wrap; word-break: break-all;
+    overflow-x: auto;
   }
   .install-code .prompt { color: var(--green); user-select: none; }
   .install-code .cmd { color: #79c0ff; }
   .install-code .url { color: #a5d6ff; }
   .copy-btn {
-    display: inline-flex; align-items: center; gap: .4rem;
+    display: inline-flex; align-items: center; gap: .3rem;
     background: var(--blue); color: #fff;
     border: none; border-radius: var(--radius-sm);
-    padding: .4rem .9rem; font-size: .8rem; font-weight: 600;
-    cursor: pointer; transition: all .2s; white-space: nowrap;
+    padding: .35rem .8rem; font-size: .78rem; font-weight: 600;
+    cursor: pointer; transition: all .2s; white-space: nowrap; flex-shrink: 0;
   }
   .copy-btn:hover { background: var(--blue-light); }
   .copy-btn.copied { background: var(--green); color: #000; }
@@ -156,12 +157,12 @@
     color: var(--blue-light); margin-bottom: .75rem;
   }
   .section-title {
-    text-align: center; font-size: clamp(1.4rem, 3vw, 2rem);
+    text-align: center; font-size: clamp(1.3rem, 3vw, 2rem);
     font-weight: 700; margin-bottom: 2.5rem;
   }
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1.2rem;
   }
   .card {
@@ -172,9 +173,12 @@
     transition: border-color .2s;
   }
   .card:hover { border-color: var(--blue); }
-  .card-icon {
-    font-size: 1.8rem; margin-bottom: .75rem;
-    display: block;
+  .card-tag {
+    display: inline-block;
+    font-size: .7rem; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--blue-light);
+    background: rgba(67,97,238,.15); border-radius: 4px;
+    padding: .15rem .45rem; margin-bottom: .75rem;
   }
   .card h3 { font-size: 1rem; font-weight: 700; margin-bottom: .5rem; }
   .card p { font-size: .875rem; color: var(--text-dim); line-height: 1.6; }
@@ -202,12 +206,12 @@
   }
   .step-num {
     flex-shrink: 0;
-    width: 36px; height: 36px;
+    width: 34px; height: 34px;
     background: var(--blue); color: #fff;
     border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    font-weight: 800; font-size: .9rem;
+    font-weight: 800; font-size: .85rem;
   }
-  .step-body { flex: 1; }
+  .step-body { flex: 1; min-width: 0; }
   .step-body h4 { font-size: 1rem; font-weight: 700; margin-bottom: .5rem; }
   .step-body p { font-size: .875rem; color: var(--text-dim); margin-bottom: .75rem; }
   .step-note {
@@ -228,13 +232,13 @@
     background: var(--surface); padding: .5rem 1rem;
     display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid var(--border);
-    font-size: .75rem; color: var(--text-dim);
+    font-size: .75rem; color: var(--text-dim); gap: .5rem;
   }
   .code-block code {
     display: block; padding: .9rem 1rem;
     font-family: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
     font-size: .825rem; color: #e6edf3; line-height: 1.7;
-    white-space: pre-wrap; word-break: break-all;
+    white-space: pre; overflow-x: auto;
   }
   .hl-prompt { color: var(--green); }
   .hl-cmd    { color: #79c0ff; }
@@ -255,11 +259,13 @@
   .demo-body {
     padding: 1.2rem 1.4rem;
     font-family: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
-    font-size: .8rem; line-height: 1.9; color: #e6edf3;
+    font-size: .82rem; line-height: 1.9; color: #e6edf3;
+    overflow-x: auto;
+    white-space: pre;
   }
   .demo-header-line { color: #79c0ff; }
   .demo-divider { color: #3a3a5a; }
-  .demo-active { background: #1d4ed8; padding: 0 .25rem; border-radius: 3px; }
+  .demo-active { background: #1d4ed8; padding: 0 .25rem; border-radius: 3px; display: inline-block; min-width: 100%; }
   .demo-cur { color: var(--yellow); }
   .demo-ok  { color: var(--green); }
   .demo-limit { color: var(--red); }
@@ -276,7 +282,7 @@
     font-size: .75rem; font-weight: 700; letter-spacing: .06em;
     text-transform: uppercase; border-bottom: 1px solid var(--border);
   }
-  .cmd-table td { padding: .75rem 1rem; border-bottom: 1px solid var(--border); }
+  .cmd-table td { padding: .75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
   .cmd-table tr:last-child td { border-bottom: none; }
   .cmd-table tr:hover td { background: var(--surface); }
   .cmd-table code {
@@ -284,12 +290,13 @@
     font-size: .8rem; color: #79c0ff;
     background: rgba(121,192,255,.1);
     padding: .15rem .4rem; border-radius: 4px;
+    white-space: nowrap;
   }
   .badge-new {
     font-size: .65rem; font-weight: 700; letter-spacing: .04em;
     background: var(--blue); color: #fff;
     padding: .1rem .35rem; border-radius: 4px; margin-left: .35rem;
-    vertical-align: middle;
+    vertical-align: middle; white-space: nowrap;
   }
 
   /* ── FAQ ── */
@@ -304,18 +311,27 @@
     padding: 1rem 1.25rem; cursor: pointer;
     font-weight: 600; font-size: .9rem;
     list-style: none; display: flex; justify-content: space-between; align-items: center;
+    gap: 1rem;
   }
-  summary::after { content: "＋"; color: var(--text-dim); font-size: 1.1rem; }
-  details[open] summary::after { content: "－"; color: var(--blue-light); }
+  summary::after { content: "+"; color: var(--text-dim); font-size: 1.2rem; font-weight: 400; flex-shrink: 0; }
+  details[open] summary::after { content: "-"; color: var(--blue-light); }
   .faq-body {
     padding: 0 1.25rem 1rem;
     font-size: .875rem; color: var(--text-dim); line-height: 1.7;
   }
+  .faq-body p + p { margin-top: .5rem; }
   .faq-body code {
     font-family: "SFMono-Regular", Consolas, monospace;
     font-size: .8rem; color: #79c0ff;
     background: rgba(121,192,255,.1);
     padding: .1rem .35rem; border-radius: 4px;
+  }
+  .faq-pre {
+    background: var(--code-bg); padding: .75rem 1rem;
+    border-radius: 6px; margin: .5rem 0;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: .8rem; color: #e6edf3;
+    overflow-x: auto; white-space: pre;
   }
 
   /* ── Footer ── */
@@ -328,28 +344,50 @@
   footer a:hover { text-decoration: underline; }
 
   /* ── Responsive ── */
-  @media (max-width: 600px) {
+  @media (max-width: 700px) {
     nav { padding: 0 1rem; }
-    .nav-links { gap: 1rem; }
-    .hero { padding: 4rem 1rem 3rem; }
-    .install-code { font-size: .78rem; }
+    .nav-links { gap: .75rem; }
+    .nav-links a { font-size: .8rem; }
+  }
+  @media (max-width: 520px) {
+    .nav-links { display: none; }
+    .hero { padding: 3.5rem 1rem 3rem; }
+    .hero-sub { font-size: .9rem; }
+    .os-tabs, .steps-tabs {
+      width: 100%;
+    }
+    .os-tab, .steps-tab {
+      flex: 1; text-align: center; padding: .45rem .5rem; font-size: .82rem;
+    }
+    .install-code { font-size: .75rem; padding: .9rem 1rem; }
+    .cards { grid-template-columns: 1fr; }
+    .step { gap: .75rem; }
+    .step-num { width: 28px; height: 28px; font-size: .78rem; }
+    .step-body h4 { font-size: .95rem; }
+    .step-body p { font-size: .83rem; }
+    .demo-body { font-size: .72rem; padding: 1rem; }
+    .cmd-table { font-size: .82rem; }
+    .cmd-table td, .cmd-table th { padding: .6rem .75rem; }
+    .container { padding: 0 1rem; }
+    .features, .steps-section, .commands-section, .faq-section { padding: 3rem 0; }
+    .section-title { margin-bottom: 1.75rem; }
   }
 </style>
 </head>
 <body>
 
-<!-- ── Nav ───────────────────────────────────────────────────────────────── -->
+<!-- Nav -->
 <nav>
-  <a class="nav-brand" href="#">🔑 <span>Codex</span> Auth Switcher</a>
+  <a class="nav-brand" href="#"><span>Codex</span> Auth Switcher</a>
   <div class="nav-links">
     <a href="#install">安裝</a>
     <a href="#commands">指令</a>
     <a href="#faq">FAQ</a>
-    <a href="https://github.com/yazelin/codex-auth-switcher" target="_blank">GitHub ↗</a>
+    <a href="https://github.com/yazelin/codex-auth-switcher" target="_blank">GitHub</a>
   </div>
 </nav>
 
-<!-- ── Hero ──────────────────────────────────────────────────────────────── -->
+<!-- Hero -->
 <section class="hero">
   <div class="hero-badge">免費開源工具</div>
   <h1>在一台電腦上<br>管理<em>多個 Codex 帳號</em></h1>
@@ -359,16 +397,16 @@
   </p>
 
   <div id="install" class="os-tabs">
-    <button class="os-tab active" onclick="switchOS('win', this)">🪟 Windows</button>
-    <button class="os-tab" onclick="switchOS('linux', this)">🐧 Linux / macOS</button>
+    <button class="os-tab active" onclick="switchOS('win', this)">Windows</button>
+    <button class="os-tab" onclick="switchOS('linux', this)">Linux / macOS</button>
   </div>
 
   <div id="panel-win" class="os-panel active">
     <div class="install-box">
       <div class="install-box-header">
         <div class="dots"><span></span><span></span><span></span></div>
-        <span>PowerShell（系統管理員不需要）</span>
-        <button class="copy-btn" onclick="copyInstall('win', this)">📋 複製</button>
+        <span>PowerShell</span>
+        <button class="copy-btn" onclick="copyInstall('win', this)">複製</button>
       </div>
       <div class="install-code"><span class="prompt">PS&gt; </span><span class="cmd">irm</span> <span class="url">https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1</span> | iex</div>
     </div>
@@ -378,39 +416,39 @@
     <div class="install-box">
       <div class="install-box-header">
         <div class="dots"><span></span><span></span><span></span></div>
-        <span>bash / zsh 終端機</span>
-        <button class="copy-btn" onclick="copyInstall('linux', this)">📋 複製</button>
+        <span>bash / zsh</span>
+        <button class="copy-btn" onclick="copyInstall('linux', this)">複製</button>
       </div>
       <div class="install-code"><span class="prompt">$ </span><span class="cmd">bash</span> &lt;(<span class="cmd">curl</span> -fsSL <span class="url">https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh</span>)</div>
     </div>
   </div>
 
-  <p class="hero-note">需要先安裝 Git。沒有 Git？<a href="#faq-git" style="color:var(--blue-light)">點這裡看安裝方法 ↓</a></p>
+  <p class="hero-note">需要先安裝 Git。沒有 Git？<a href="#faq-git" style="color:var(--blue-light)">點這裡看安裝方法</a></p>
 </section>
 
-<!-- ── Features ──────────────────────────────────────────────────────────── -->
+<!-- Features -->
 <section class="features">
   <div class="container">
     <div class="section-label">為什麼需要它</div>
     <div class="section-title">解決 Codex 多帳號的痛點</div>
     <div class="cards">
       <div class="card">
-        <span class="card-icon">🗝️</span>
-        <h3>儲存多個帳號登入狀態</h3>
+        <div class="card-tag">儲存</div>
+        <h3>多個帳號登入狀態</h3>
         <p>把每個 Codex 帳號的 auth token 分別存成獨立 profile，不會互相干擾。</p>
       </div>
       <div class="card">
-        <span class="card-icon">⚡</span>
+        <div class="card-tag">切換</div>
         <h3>一個指令即時切換</h3>
         <p><code style="font-family:monospace;background:rgba(67,97,238,.15);padding:.1rem .3rem;border-radius:4px;color:#79c0ff">cx switch</code> 開啟互動選單，選好按 Enter，自動結束現有 Codex、切換帳號。</p>
       </div>
       <div class="card">
-        <span class="card-icon">📊</span>
+        <div class="card-tag">追蹤</div>
         <h3>自動追蹤用量上限</h3>
         <p>每次 Codex 結束後自動掃描限額狀態，哪個帳號到限、何時重置，一目了然。</p>
       </div>
       <div class="card">
-        <span class="card-icon">🔒</span>
+        <div class="card-tag">共用</div>
         <h3>設定與歷史完全共用</h3>
         <p>config、hooks、session 歷史通通共用，只有 auth token 會切換，其他不受影響。</p>
       </div>
@@ -418,15 +456,15 @@
   </div>
 </section>
 
-<!-- ── Steps ─────────────────────────────────────────────────────────────── -->
+<!-- Steps -->
 <section class="steps-section">
   <div class="container">
     <div class="section-label">操作步驟</div>
     <div class="section-title">從安裝到第一次切換</div>
 
     <div class="steps-tabs">
-      <button class="steps-tab active" onclick="switchSteps('win', this)">🪟 Windows</button>
-      <button class="steps-tab" onclick="switchSteps('linux', this)">🐧 Linux / macOS</button>
+      <button class="steps-tab active" onclick="switchSteps('win', this)">Windows</button>
+      <button class="steps-tab" onclick="switchSteps('linux', this)">Linux / macOS</button>
     </div>
 
     <!-- Windows Steps -->
@@ -440,7 +478,7 @@
           <div class="code-block">
             <div class="code-block-header">
               <span>PowerShell</span>
-              <button class="copy-btn" onclick="copyCode(this, 'irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex')">📋 複製</button>
+              <button class="copy-btn" onclick="copyCode(this, 'irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex')">複製</button>
             </div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">irm</span> https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex</code>
           </div>
@@ -454,7 +492,7 @@
           <h4>儲存你目前的 Codex 帳號</h4>
           <p>如果你的電腦已經登入過 Codex，執行這行把現有登入狀態存成叫做「main」的 profile：</p>
           <div class="code-block">
-            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx import main')">📋 複製</button></div>
+            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx import main')">複製</button></div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">cx import</span> <span class="hl-arg">main</span></code>
           </div>
           <p style="margin-top:.75rem;font-size:.875rem;color:var(--text-dim)">「main」只是名稱，你也可以用自己的名字或帳號暱稱。</p>
@@ -467,7 +505,7 @@
           <h4>新增第二個帳號</h4>
           <p>執行 <code style="font-family:monospace;color:#79c0ff">cx login</code> 加上你想取的名稱，Codex 的登入視窗就會開啟：</p>
           <div class="code-block">
-            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx login work')">📋 複製</button></div>
+            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx login work')">複製</button></div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">cx login</span> <span class="hl-arg">work</span>
 <span class="hl-out"># 登入完成後，work profile 就儲存好了</span></code>
           </div>
@@ -479,7 +517,7 @@
         <div class="step-body">
           <h4>查看所有帳號狀態</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx list')">📋 複製</button></div>
+            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx list')">複製</button></div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">cx list</span>
 <span class="hl-out">CURRENT  PROFILE   LOGIN   EMAIL                  PLAN   LIMIT
 *        main      ok      ma***@gmail.com        plus   -
@@ -495,11 +533,11 @@
           <h4>用互動選單切換帳號</h4>
           <p>這是最推薦的切換方式——會自動先關掉正在跑的 Codex，再切換：</p>
           <div class="code-block">
-            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx switch')">📋 複製</button></div>
+            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'cx switch')">複製</button></div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">cx switch</span></code>
           </div>
           <div class="step-note">
-            <strong>操作方式：</strong>↑↓ 選擇帳號　Enter 確認切換　Esc 取消
+            <strong>操作方式：</strong>↑↓ 選擇帳號 &nbsp; Enter 確認切換 &nbsp; Esc 取消
           </div>
         </div>
       </div>
@@ -509,7 +547,7 @@
         <div class="step-body">
           <h4>啟動 Codex</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'codex')">📋 複製</button></div>
+            <div class="code-block-header"><span>PowerShell</span><button class="copy-btn" onclick="copyCode(this, 'codex')">複製</button></div>
             <code><span class="hl-prompt">PS&gt; </span><span class="hl-cmd">codex</span></code>
           </div>
           <p style="margin-top:.75rem;font-size:.875rem;color:var(--text-dim)">以後就用 <code style="font-family:monospace;color:#79c0ff">codex</code>（不是直接執行原本的 codex.exe）來啟動，這樣切換才會生效。</p>
@@ -526,7 +564,7 @@
         <div class="step-body">
           <h4>開啟終端機，貼上安裝指令</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>bash / zsh</span><button class="copy-btn" onclick="copyCode(this, 'bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)')">📋 複製</button></div>
+            <div class="code-block-header"><span>bash / zsh</span><button class="copy-btn" onclick="copyCode(this, 'bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)')">複製</button></div>
             <code><span class="hl-prompt">$ </span><span class="hl-cmd">bash</span> &lt;(<span class="hl-cmd">curl</span> -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)</code>
           </div>
         </div>
@@ -537,7 +575,7 @@
         <div class="step-body">
           <h4>重新載入 shell（或開新終端機）</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'source ~/.bashrc')">📋 複製</button></div>
+            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'source ~/.bashrc')">複製</button></div>
             <code><span class="hl-prompt">$ </span><span class="hl-cmd">source</span> ~/.bashrc
 <span class="hl-out"># zsh 用戶請改為：source ~/.zshrc</span></code>
           </div>
@@ -549,7 +587,7 @@
         <div class="step-body">
           <h4>儲存現有帳號、新增更多帳號</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'cx import main\ncx login work')">📋 複製</button></div>
+            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'cx import main\ncx login work')">複製</button></div>
             <code><span class="hl-prompt">$ </span><span class="hl-cmd">cx import</span> <span class="hl-arg">main</span>   <span class="hl-out"># 儲存現有帳號</span>
 <span class="hl-prompt">$ </span><span class="hl-cmd">cx login</span>  <span class="hl-arg">work</span>   <span class="hl-out"># 新增第二個帳號</span></code>
           </div>
@@ -561,7 +599,7 @@
         <div class="step-body">
           <h4>切換帳號</h4>
           <div class="code-block">
-            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'cx use work\ncodex')">📋 複製</button></div>
+            <div class="code-block-header"><span>bash</span><button class="copy-btn" onclick="copyCode(this, 'cx use work\ncodex')">複製</button></div>
             <code><span class="hl-prompt">$ </span><span class="hl-cmd">cx use</span> <span class="hl-arg">work</span>   <span class="hl-out"># 切換到 work 帳號</span>
 <span class="hl-prompt">$ </span><span class="hl-cmd">codex</span>           <span class="hl-out"># 啟動 Codex</span></code>
           </div>
@@ -573,30 +611,29 @@
   </div>
 </section>
 
-<!-- ── cx switch demo ─────────────────────────────────────────────────────── -->
-<section style="padding:0 0 4rem; border-top:0">
+<!-- cx switch demo -->
+<section style="padding:0 0 4rem">
   <div class="container">
     <div class="section-label">互動切換介面</div>
-    <div class="section-title">cx switch — 選單示意</div>
+    <div class="section-title">cx switch 選單示意</div>
     <div class="demo-box">
       <div class="demo-box-header">
         <div class="dots"><span></span><span></span><span></span></div>
         <span class="demo-title">PowerShell / bash — cx switch</span>
       </div>
-      <div class="demo-body">
-<span class="demo-header-line">  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)</span>
-<span class="demo-divider">  ─────────────────────────────────────────────────────────────────────</span>
-  <span class="demo-cur">*</span> <span class="demo-active">  main                   ok                                         </span>
-    work                   ok       <span class="demo-limit">!hit until 2026-05-27 09:00</span>
-    personal               ok</div>
+      <div class="demo-body"><span class="demo-header-line">  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)
+</span><span class="demo-divider">  ─────────────────────────────────────────────────────────────
+</span>  <span class="demo-cur">*</span> <span class="demo-active"> main       ok                                   </span>
+    work       ok       <span class="demo-limit">!hit until 2026-05-27 09:00</span>
+    personal   ok</div>
     </div>
     <p style="text-align:center;font-size:.825rem;color:var(--text-dim);margin-top:1rem">
-      藍色反白 = 目前選到的帳號 ／ <span style="color:var(--yellow)">*</span> = 目前使用中 ／ <span style="color:var(--red)">!hit</span> = 達到用量上限
+      藍色反白 = 目前選到的帳號 &nbsp;/&nbsp; <span style="color:var(--yellow)">*</span> = 目前使用中 &nbsp;/&nbsp; <span style="color:var(--red)">!hit</span> = 達到用量上限
     </p>
   </div>
 </section>
 
-<!-- ── Commands ───────────────────────────────────────────────────────────── -->
+<!-- Commands -->
 <section class="commands-section" id="commands">
   <div class="container">
     <div class="section-label">完整指令列表</div>
@@ -607,7 +644,7 @@
         <tr><th>指令</th><th>功能說明</th></tr>
       </thead>
       <tbody>
-        <tr><td><code>cx switch</code><span class="badge-new">NEW</span></td><td>🌟 互動選單切換帳號，自動先關閉 Codex</td></tr>
+        <tr><td><code>cx switch</code><span class="badge-new">NEW</span></td><td>互動選單切換帳號，自動先關閉 Codex</td></tr>
         <tr><td><code>cx kill</code><span class="badge-new">NEW</span></td><td>立即關閉所有正在運行的 Codex 程序</td></tr>
         <tr><td><code>cx import &lt;名稱&gt;</code></td><td>把目前登入狀態存成 profile</td></tr>
         <tr><td><code>cx login &lt;名稱&gt;</code></td><td>開啟 Codex 登入，存成新 profile</td></tr>
@@ -629,7 +666,7 @@
   </div>
 </section>
 
-<!-- ── FAQ ────────────────────────────────────────────────────────────────── -->
+<!-- FAQ -->
 <section class="faq-section" id="faq">
   <div class="container">
     <div class="section-label">常見問題</div>
@@ -639,11 +676,10 @@
       <summary>沒有安裝 Git，要怎麼辦？</summary>
       <div class="faq-body">
         <p><strong>Windows：</strong>在 PowerShell 輸入：</p>
-        <pre style="background:var(--code-bg);padding:.75rem 1rem;border-radius:6px;margin:.5rem 0;font-family:monospace;font-size:.8rem;color:#e6edf3">winget install --id Git.Git -e --source winget</pre>
+        <div class="faq-pre">winget install --id Git.Git -e --source winget</div>
         <p>安裝完後關掉 PowerShell 再重開，就有 git 了。</p>
-        <br>
-        <p><strong>Linux（Ubuntu/Debian）：</strong></p>
-        <pre style="background:var(--code-bg);padding:.75rem 1rem;border-radius:6px;margin:.5rem 0;font-family:monospace;font-size:.8rem;color:#e6edf3">sudo apt install git</pre>
+        <p style="margin-top:.75rem"><strong>Linux（Ubuntu/Debian）：</strong></p>
+        <div class="faq-pre">sudo apt install git</div>
         <p><strong>macOS：</strong>在終端機輸入 <code>git</code>，macOS 會自動提示安裝 Xcode Command Line Tools。</p>
       </div>
     </details>
@@ -652,7 +688,7 @@
       <summary>執行安裝指令時出現「執行原則」錯誤？</summary>
       <div class="faq-body">
         <p>Windows 有時會封鎖 PowerShell 腳本的執行。先執行這行解除限制，再重貼安裝指令：</p>
-        <pre style="background:var(--code-bg);padding:.75rem 1rem;border-radius:6px;margin:.5rem 0;font-family:monospace;font-size:.8rem;color:#e6edf3">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</pre>
+        <div class="faq-pre">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</div>
       </div>
     </details>
 
@@ -660,7 +696,7 @@
       <summary>cx 或 codex 指令在新開的 PowerShell 視窗裡不能用？</summary>
       <div class="faq-body">
         <p>安裝指令會把設定加到你的 PowerShell profile，但需要重新開啟 PowerShell 才生效。如果還是不行，確認 profile 檔案裡有這行：</p>
-        <pre style="background:var(--code-bg);padding:.75rem 1rem;border-radius:6px;margin:.5rem 0;font-family:monospace;font-size:.8rem;color:#e6edf3">notepad $PROFILE</pre>
+        <div class="faq-pre">notepad $PROFILE</div>
         <p>裡面應該有一行 <code>. "C:\Users\你的名字\codex-auth-switcher\shell\powershell.ps1"</code>。沒有的話，手動加上去存檔，再重開 PowerShell。</p>
       </div>
     </details>
@@ -689,7 +725,7 @@
     </details>
 
     <details>
-      <summary>LIMIT 欄位顯示「hit until …」是什麼意思？</summary>
+      <summary>LIMIT 欄位顯示「hit until ...」是什麼意思？</summary>
       <div class="faq-body">
         <p>這個帳號已達到 Codex 的使用上限，顯示的時間是重置時間。重置後 <code>cx list</code> 會自動清掉這個標記。</p>
         <p>如果確定已經重置但標記還在，可以手動清除：<code>cx ok &lt;名稱&gt;</code></p>
@@ -699,7 +735,7 @@
   </div>
 </section>
 
-<!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+<!-- Footer -->
 <footer>
   <p>
     <a href="https://github.com/yazelin/codex-auth-switcher" target="_blank">github.com/yazelin/codex-auth-switcher</a>
@@ -711,7 +747,6 @@
 </footer>
 
 <script>
-  // OS tab switching (hero)
   function switchOS(os, btn) {
     document.querySelectorAll('.os-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.os-panel').forEach(p => p.classList.remove('active'));
@@ -719,7 +754,6 @@
     document.getElementById('panel-' + os).classList.add('active');
   }
 
-  // Steps tab switching
   function switchSteps(os, btn) {
     document.querySelectorAll('.steps-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.steps-panel').forEach(p => p.classList.remove('active'));
@@ -727,32 +761,28 @@
     document.getElementById('steps-' + os).classList.add('active');
   }
 
-  // Copy install command (hero)
-  const installCmds = {
+  var installCmds = {
     win:   'irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex',
     linux: 'bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)'
   };
+
   function copyInstall(os, btn) {
-    navigator.clipboard.writeText(installCmds[os]).then(() => {
-      btn.textContent = '✓ 已複製';
+    navigator.clipboard.writeText(installCmds[os]).then(function() {
+      btn.textContent = '已複製';
       btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = '📋 複製'; btn.classList.remove('copied'); }, 2000);
+      setTimeout(function() { btn.textContent = '複製'; btn.classList.remove('copied'); }, 2000);
     });
   }
 
-  // Generic copy button
   function copyCode(btn, text) {
-    navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = '✓ 已複製';
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = '已複製';
       btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = '📋 複製'; btn.classList.remove('copied'); }, 2000);
+      setTimeout(function() { btn.textContent = '複製'; btn.classList.remove('copied'); }, 2000);
     });
   }
 
-  // Auto-select OS tab based on platform hint
-  if (navigator.platform.toLowerCase().includes('win')) {
-    // already default
-  } else {
+  if (!navigator.platform.toLowerCase().includes('win')) {
     document.querySelectorAll('.os-tab')[1].click();
     document.querySelectorAll('.steps-tab')[1].click();
   }
