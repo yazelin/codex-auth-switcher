@@ -496,8 +496,16 @@ function Invoke-CodexWithEnv([string]$Profile, [string[]]$CodexArgs = @()) {
     try {
         $env:CODEX_HOME = $CodexHome
         $env:CODEX_AUTH_PROFILE = $Profile
-        & $codexBin @CodexArgs
-        return $LASTEXITCODE
+        # Start-Process -NoNewWindow shares the current console window with the child
+        # process, ensuring Node.js isTTY = true. The & operator inside a running
+        # script can route stdout through PowerShell's output pipeline, breaking the
+        # TTY check even in an interactive terminal.
+        $startArgs = @{ FilePath = $codexBin; NoNewWindow = $true; PassThru = $true; Wait = $true }
+        if ($CodexArgs.Count -gt 0) { $startArgs.ArgumentList = $CodexArgs }
+        $proc = Start-Process @startArgs
+        $exitCode = 0
+        if ($null -ne $proc.ExitCode) { $exitCode = [int]$proc.ExitCode }
+        return $exitCode
     } finally {
         if ($null -eq $oldCodexHome) { Remove-Item Env:\CODEX_HOME -ErrorAction SilentlyContinue } else { $env:CODEX_HOME = $oldCodexHome }
         if ($null -eq $oldAuthProfile) { Remove-Item Env:\CODEX_AUTH_PROFILE -ErrorAction SilentlyContinue } else { $env:CODEX_AUTH_PROFILE = $oldAuthProfile }
