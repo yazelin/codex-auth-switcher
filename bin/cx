@@ -19,6 +19,8 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
+  cx switch                 Interactive profile switcher (kills Codex first)
+  cx kill                   Kill all active Codex processes
   cx remove <name>          Remove a saved auth profile
   cx list                   List profiles, login, metadata, and limit state
   cx info [name]            Show metadata for one profile
@@ -318,6 +320,41 @@ active_codex_processes() {
     codex_process_rows | awk -F '\t' '$1 == "active" { print }'
 }
 
+kill_active_codex() {
+    local rows pid count=0
+    local -a pids=()
+
+    rows="$(active_codex_processes || true)"
+    [ -n "$rows" ] || {
+        printf '0\n'
+        return 0
+    }
+
+    while IFS=$'\t' read -r _kind pid _tty _command; do
+        [ -n "${pid:-}" ] || continue
+        pids+=("$pid")
+    done <<< "$rows"
+
+    for pid in "${pids[@]}"; do
+        if kill "$pid" 2>/dev/null; then
+            count=$((count + 1))
+        else
+            printf 'cx: could not kill pid %s\n' "$pid" >&2
+        fi
+    done
+
+    if [ "$count" -gt 0 ]; then
+        sleep 0.5
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    printf '%s\n' "$count"
+}
+
 assert_no_active_codex() {
     [ "${CX_ALLOW_ACTIVE_CODEX:-0}" = "1" ] && return 0
     local active
@@ -585,6 +622,152 @@ cmd_use() {
     printf 'current: %s\n' "$name"
 }
 
+draw_switch_menu() {
+    local selected="$1"
+    local current="$2"
+    local title="  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)"
+    local i name mark login limit limit_text line
+
+    printf '\033[H\033[2J' >&3
+    printf '\033[36m%s\033[0m\n' "$title" >&3
+    printf '  %s\n' "----------------------------------------------------------------------" >&3
+
+    for i in "${!profile_names[@]}"; do
+        name="${profile_names[$i]}"
+        mark=" "
+        [ "$name" = "$current" ] && mark="*"
+        login="$(auth_state "$name")"
+        limit="$(limit_status "$name")"
+        limit_text=""
+        [ "$limit" != "-" ] && limit_text="  !$limit"
+        line="$(printf '  %s %-20s %-8s%s' "$mark" "$name" "$login" "$limit_text")"
+
+        if [ "$i" -eq "$selected" ]; then
+            printf '\033[7m%-72s\033[0m\n' "$line" >&3
+        else
+            printf '%-72s\n' "$line" >&3
+        fi
+    done
+
+    printf '\n' >&3
+}
+
+read_switch_key() {
+    local key rest
+
+    IFS= read -rsn1 key <&3 || return 1
+    if [ "$key" = $'\033' ]; then
+        IFS= read -rsn2 -t 1 rest <&3 || true
+        case "$rest" in
+            "[A") printf 'up\n' ;;
+            "[B") printf 'down\n' ;;
+            *) printf 'esc\n' ;;
+        esac
+    elif [ -z "$key" ] || [ "$key" = $'\r' ]; then
+        printf 'enter\n'
+    else
+        case "$key" in
+            k) printf 'up\n' ;;
+            j) printf 'down\n' ;;
+            q) printf 'esc\n' ;;
+            *) printf 'other\n' ;;
+        esac
+    fi
+}
+
+switch_terminal_cleanup() {
+    printf '\033[?25h\033[0m' >&3 2>/dev/null || true
+    printf '\033[?1049l' >&3 2>/dev/null || true
+}
+
+cmd_switch() {
+    ensure_dirs
+
+    if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+        die "cx switch requires an interactive terminal; use: cx use <name>"
+    fi
+
+    local current selected=0 chosen="" cancelled=0 key
+    local dir name killed
+    local -a profile_names=()
+    current="$(current_profile)"
+
+    while IFS= read -r dir; do
+        name="$(basename "$dir")"
+        [ "$name" = ".lock" ] && continue
+        profile_names+=("$name")
+    done < <(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' -print 2>/dev/null | sort)
+
+    [ "${#profile_names[@]}" -gt 0 ] || die "no profiles found; run: cx import <name>"
+
+    for i in "${!profile_names[@]}"; do
+        if [ "${profile_names[$i]}" = "$current" ]; then
+            selected="$i"
+            break
+        fi
+    done
+
+    trap 'switch_terminal_cleanup; exit 130' INT TERM
+    printf '\033[?1049h\033[?25l' >&3
+
+    while true; do
+        draw_switch_menu "$selected" "$current"
+        key="$(read_switch_key || printf 'esc\n')"
+
+        case "$key" in
+            up)
+                [ "$selected" -gt 0 ] && selected=$((selected - 1))
+                ;;
+            down)
+                [ "$selected" -lt "$((${#profile_names[@]} - 1))" ] && selected=$((selected + 1))
+                ;;
+            enter)
+                chosen="${profile_names[$selected]}"
+                break
+                ;;
+            esc)
+                cancelled=1
+                break
+                ;;
+        esac
+    done
+
+    switch_terminal_cleanup
+    trap - INT TERM
+    exec 3>&-
+
+    if [ "$cancelled" -eq 1 ]; then
+        printf 'cancelled.\n'
+        return 0
+    fi
+    if [ "$chosen" = "$current" ]; then
+        printf 'already on: %s\n' "$chosen"
+        return 0
+    fi
+
+    [ -f "$(profile_auth "$chosen")" ] || die "profile has no auth.json: $chosen; run: cx login $chosen"
+
+    killed="$(kill_active_codex)"
+    if [ "$killed" -gt 0 ]; then
+        printf 'Killed %s active Codex process(es).\n' "$killed"
+    fi
+
+    save_active_auth_if_known
+    stage_profile_auth "$chosen"
+    set_current_profile "$chosen"
+    printf 'switched to: %s\n' "$chosen"
+}
+
+cmd_kill() {
+    local killed
+    killed="$(kill_active_codex)"
+    if [ "$killed" -eq 0 ]; then
+        printf 'No active Codex processes found.\n'
+    else
+        printf 'Killed %s active Codex process(es).\n' "$killed"
+    fi
+}
+
 cmd_remove() {
     local name="${1:-}"
     [ -n "$name" ] || die "usage: cx remove <name>"
@@ -764,6 +947,8 @@ main() {
         import|init) cmd_import "$@" ;;
         login) cmd_login "$@" ;;
         use) cmd_use "$@" ;;
+        switch) cmd_switch "$@" ;;
+        kill) cmd_kill "$@" ;;
         remove|rm|delete) cmd_remove "$@" ;;
         list|ls) cmd_list "$@" ;;
         info) cmd_info "$@" ;;
