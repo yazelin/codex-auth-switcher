@@ -189,6 +189,13 @@ function Copy-CodexHomeEntryToRuntime([System.IO.FileSystemInfo]$Entry, [string]
     }
 
     $destination = Join-Path $RuntimeHome $name
+    if ($name -eq "hooks.json" -and -not $Entry.PSIsContainer) {
+        $text = [System.IO.File]::ReadAllText($Entry.FullName)
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($destination, $text, $utf8NoBom)
+        return
+    }
+
     try {
         New-Item -ItemType SymbolicLink -Path $destination -Target $Entry.FullName -ErrorAction Stop | Out-Null
         return

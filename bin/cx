@@ -172,6 +172,21 @@ runtime_root() {
     printf '%s/.runtime\n' "$CX_PROFILES_DIR"
 }
 
+copy_hooks_json_to_runtime() {
+    local source="$1"
+    local destination="$2"
+    local bom first
+
+    bom="$(printf '\357\273\277')"
+    first="$(LC_ALL=C dd if="$source" bs=3 count=1 2>/dev/null || true)"
+    if [ "$first" = "$bom" ]; then
+        tail -c +4 "$source" > "$destination" 2>/dev/null ||
+            cp "$source" "$destination"
+    else
+        cp "$source" "$destination"
+    fi
+}
+
 prepare_runtime_codex_home() {
     local name="$1"
     local root runtime auth entry base
@@ -190,6 +205,11 @@ prepare_runtime_codex_home() {
             case "$base" in
                 auth.json|sessions|history.jsonl|logs_*.sqlite) continue ;;
             esac
+
+            if [ "$base" = "hooks.json" ] && [ -f "$entry" ]; then
+                copy_hooks_json_to_runtime "$entry" "$runtime/$base"
+                continue
+            fi
 
             ln -s "$entry" "$runtime/$base" 2>/dev/null ||
                 cp -R "$entry" "$runtime/$base" 2>/dev/null ||
