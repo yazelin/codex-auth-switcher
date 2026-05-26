@@ -2,7 +2,16 @@
 set -euo pipefail
 
 CX_PROFILES_DIR="${CX_PROFILES_DIR:-$HOME/.codex_auth_profiles}"
-CX_CODEX_HOME="${CX_CODEX_HOME:-${CODEX_HOME:-$HOME/.codex}}"
+if [ -n "${CX_CODEX_HOME:-}" ]; then
+    :
+elif [ -n "${CODEX_HOME:-}" ]; then
+    case "$CODEX_HOME" in
+        "$CX_PROFILES_DIR"/.runtime/run-*) CX_CODEX_HOME="$HOME/.codex" ;;
+        *) CX_CODEX_HOME="$CODEX_HOME" ;;
+    esac
+else
+    CX_CODEX_HOME="$HOME/.codex"
+fi
 CX_LIMIT_THRESHOLD="${CX_LIMIT_THRESHOLD:-100}"
 
 current_file="$CX_PROFILES_DIR/current"
@@ -172,6 +181,16 @@ runtime_root() {
     printf '%s/.runtime\n' "$CX_PROFILES_DIR"
 }
 
+is_codex_runtime_database_entry() {
+    local base="$1"
+    case "$base" in
+        *.sqlite|*.sqlite-*|*.sqlite.*|*.sqlite3|*.sqlite3-*|*.sqlite3.*|*.db|*.db-*|*.db.*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 copy_hooks_json_to_runtime() {
     local source="$1"
     local destination="$2"
@@ -203,8 +222,9 @@ prepare_runtime_codex_home() {
             [ -e "$entry" ] || continue
             base="$(basename "$entry")"
             case "$base" in
-                auth.json|sessions|history.jsonl|logs_*.sqlite) continue ;;
+                auth.json|sessions|history.jsonl) continue ;;
             esac
+            is_codex_runtime_database_entry "$base" && continue
 
             if [ "$base" = "hooks.json" ] && [ -f "$entry" ]; then
                 copy_hooks_json_to_runtime "$entry" "$runtime/$base"

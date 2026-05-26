@@ -2,7 +2,20 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ProfilesDir = if ($env:CX_PROFILES_DIR) { $env:CX_PROFILES_DIR } else { Join-Path $HOME ".codex_auth_profiles" }
-$CodexHome = if ($env:CX_CODEX_HOME) { $env:CX_CODEX_HOME } elseif ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$DefaultCodexHome = Join-Path $HOME ".codex"
+if ($env:CX_CODEX_HOME) {
+    $CodexHome = $env:CX_CODEX_HOME
+} elseif ($env:CODEX_HOME) {
+    $runtimeRootText = (Join-Path $ProfilesDir ".runtime").TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+    $codexHomeText = ([string]$env:CODEX_HOME).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+    if ($codexHomeText.StartsWith("$runtimeRootText/run-", [StringComparison]::OrdinalIgnoreCase)) {
+        $CodexHome = $DefaultCodexHome
+    } else {
+        $CodexHome = $env:CODEX_HOME
+    }
+} else {
+    $CodexHome = $DefaultCodexHome
+}
 $LimitThreshold = if ($env:CX_LIMIT_THRESHOLD) { [double]$env:CX_LIMIT_THRESHOLD } else { 100.0 }
 
 $CurrentFile = Join-Path $ProfilesDir "current"
@@ -182,9 +195,13 @@ function Get-RuntimeRoot {
     Join-Path $ProfilesDir ".runtime"
 }
 
+function Test-CodexRuntimeDatabaseEntry([string]$Name) {
+    $Name -match '\.sqlite3?($|[.-])' -or $Name -match '\.db($|[.-])'
+}
+
 function Copy-CodexHomeEntryToRuntime([System.IO.FileSystemInfo]$Entry, [string]$RuntimeHome) {
     $name = $Entry.Name
-    if ($name -eq "auth.json" -or $name -eq "sessions" -or $name -eq "history.jsonl" -or $name -like "logs_*.sqlite") {
+    if ($name -eq "auth.json" -or $name -eq "sessions" -or $name -eq "history.jsonl" -or (Test-CodexRuntimeDatabaseEntry $name)) {
         return
     }
 
