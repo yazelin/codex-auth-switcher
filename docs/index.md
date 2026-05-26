@@ -134,7 +134,7 @@ If there are active Codex processes when you press Enter, they are killed before
 
 Only `~/.codex/auth.json` is switched between profiles.
 
-Wrapped `codex` runs use a temporary per-process `CODEX_HOME`, so multiple Codex sessions can run at the same time without racing on the shared `auth.json`.
+Wrapped `codex` runs use the normal Codex home, so same-account multi-session work keeps shared `/resume`, session history, sqlite state, skills, and plugins. Profile switching is guarded while Codex is active so `auth.json` is not changed under a running session.
 
 Configuration and reusable resources are shared across all profiles on the same machine:
 
@@ -142,10 +142,11 @@ Configuration and reusable resources are shared across all profiles on the same 
 |---|---|
 | `~/.codex/config.toml` | ✓ yes |
 | `~/.codex/hooks.json` | ✓ yes |
-| `~/.codex_auth_profiles/.runtime/run-.../sessions/` | per wrapped run |
+| `~/.codex/sessions/` | shared |
+| `~/.codex/history.jsonl` | shared |
 | `~/.codex/auth.json` | — switched per profile |
 
-This means skills, memories, and config are the same regardless of which account you are using, while each wrapped Codex process keeps its own auth/session runtime.
+This means skills, memories, config, and resume history are shared for the active account. Switch profiles only after active Codex sessions are closed, or use `cx switch` to kill them before switching.
 
 ---
 

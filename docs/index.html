@@ -712,7 +712,7 @@
     <details>
       <summary>兩個帳號可以同時開著 Codex 嗎？</summary>
       <div class="faq-body">
-        <p>可以。透過 <code>codex</code> wrapper 啟動時，每個 Codex process 都會拿到自己的暫存 <code>CODEX_HOME</code> 和該 profile 的 <code>auth.json</code>，所以可以雙開或三開，也可以先 <code>cx use</code> 切到另一個 profile 再開新的 Codex。只有 <code>cx login</code> 這類登入流程仍會在 Codex 執行中拒絕。</p>
+        <p>可以。透過 <code>codex</code> wrapper 啟動時，Codex 會使用一般的 <code>~/.codex</code>，所以同一個 active profile 可以雙開或三開，也會共用 <code>/resume</code> 歷史。<code>cx use</code> 和 <code>cx login</code> 這類會改 <code>auth.json</code> 的操作會在 Codex 執行中拒絕，避免跑到一半被切換帳號。</p>
       </div>
     </details>
 

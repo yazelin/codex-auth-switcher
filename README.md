@@ -32,7 +32,7 @@ The design intentionally shares the Codex configuration and reusable local resou
 - plugins, skills, memories, and other state
 
 Only `~/.codex/auth.json` is switched between named auth profiles.
-Wrapped `codex` runs use a temporary per-process `CODEX_HOME` so multiple Codex sessions can run at the same time without racing on `auth.json`.
+Wrapped `codex` runs use the normal Codex home, so multiple sessions on the same active account share `/resume`, session history, sqlite state, skills, and plugins. Account switching is guarded while Codex is active to avoid changing `auth.json` under a running session.
 
 ## Platform Support
 
@@ -45,7 +45,7 @@ The behavior and storage format are the same on both platforms. Windows uses Pow
 
 ## Layout
 
-Shared Codex state stays where Codex already expects it. Wrapped `codex` runs mirror this state into a temporary runtime home for each process:
+Shared Codex state stays where Codex already expects it:
 
 ```text
 ~/.codex/
@@ -55,14 +55,6 @@ Shared Codex state stays where Codex already expects it. Wrapped `codex` runs mi
   sessions/        # direct Codex sessions
   history.jsonl    # direct Codex history
   logs_*.sqlite    # direct Codex logs
-```
-
-```text
-~/.codex_auth_profiles/.runtime/run-.../
-  auth.json        # selected profile auth for this Codex process
-  config.toml      # linked or copied from ~/.codex
-  hooks.json       # linked or copied from ~/.codex
-  sessions/        # this run's sessions
 ```
 
 Stored auth profiles live separately.
@@ -350,11 +342,11 @@ Add that command to the `Stop` section of `%USERPROFILE%\.codex\hooks.json`:
 
 ## Concurrency
 
-Wrapped `codex` runs are concurrency-safe. Each launch gets a temporary runtime `CODEX_HOME` under `~/.codex_auth_profiles/.runtime/` with that profile's `auth.json`, while shared config and reusable resources are linked or copied in.
+Wrapped `codex` runs use the shared Codex home. Multiple sessions on the same active profile can run at the same time and see the same `/resume` history.
 
-That means you can open two or three Codex sessions at the same time, including sessions that were started under different profiles.
+That means you can open two or three Codex sessions at the same time when they use the same active profile.
 
-`cx use` is safe while Codex is running because wrapped sessions use their own runtime homes. `cx login` still checks for other active Codex processes before starting a login flow. `cx switch` intentionally kills active Codex processes before switching the shared active profile.
+`cx use` and `cx login` check for other active Codex processes before changing `~/.codex/auth.json`. `cx switch` intentionally kills active Codex processes before switching the shared active profile.
 
 ```bash
 cx ps

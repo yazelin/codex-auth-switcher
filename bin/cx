@@ -447,12 +447,13 @@ kill_active_codex() {
 }
 
 assert_no_active_codex() {
+    local action="${1:-login}"
     [ "${CX_ALLOW_ACTIVE_CODEX:-0}" = "1" ] && return 0
     local active
     active="$(active_codex_processes || true)"
     [ -z "$active" ] && return 0
 
-    printf 'cx: refusing to login while another Codex session is active\n' >&2
+    printf 'cx: refusing to %s while another Codex session is active\n' "$action" >&2
     printf 'cx: run `cx ps` for details, or set CX_ALLOW_ACTIVE_CODEX=1 to override\n' >&2
     printf '%s\n' "$active" | awk -F '\t' '{ printf "  pid=%s tty=%s command=%s\n", $2, $3, $4 }' >&2
     exit 1
@@ -666,7 +667,7 @@ cmd_login() {
 
     ensure_dirs
     acquire_lock
-    assert_no_active_codex
+    assert_no_active_codex "login"
     save_active_auth_if_known
 
     local backup=""
@@ -708,6 +709,11 @@ cmd_use() {
     [ -n "$name" ] || die "usage: cx use <name>"
     ensure_dirs
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
+    if [ "$name" = "$(current_profile)" ]; then
+        printf 'current: %s\n' "$name"
+        return 0
+    fi
+    assert_no_active_codex "switch profiles"
     save_active_auth_if_known
     stage_profile_auth "$name"
     set_current_profile "$name"
@@ -936,21 +942,21 @@ cmd_run() {
     fi
 
     ensure_dirs
-    local name codex_bin status runtime_home
+    local name codex_bin status
     name="$(require_current_profile)"
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
 
-    runtime_home="$(prepare_runtime_codex_home "$name")"
+    save_active_auth_if_known
+    stage_profile_auth "$name"
     codex_bin="$(find_codex_bin)"
 
     set +e
-    CODEX_HOME="$runtime_home" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
+    CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
     status=$?
     set -e
 
-    store_profile_auth_from_file "$name" "$runtime_home/auth.json"
-    scan_limit_for_profile "$name" "$runtime_home" || true
-    cleanup_runtime_codex_home "$runtime_home"
+    store_profile_auth "$name"
+    scan_limit_for_profile "$name" "$CX_CODEX_HOME" || true
     return "$status"
 }
 

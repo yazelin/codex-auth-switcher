@@ -409,12 +409,12 @@ function Get-CodexProcesses {
     }
 }
 
-function Assert-NoActiveCodex {
+function Assert-NoActiveCodex([string]$Action = "login") {
     if ($env:CX_ALLOW_ACTIVE_CODEX -eq "1") { return }
     $active = @(Get-CodexProcesses | Where-Object { $_.Kind -eq "active" })
     if ($active.Count -eq 0) { return }
 
-    [Console]::Error.WriteLine("cx: refusing to login while another Codex session is active")
+    [Console]::Error.WriteLine("cx: refusing to $Action while another Codex session is active")
     $active | ForEach-Object {
         [Console]::Error.WriteLine(("  pid={0} command={1}" -f $_.PID, $_.Command))
     }
@@ -649,6 +649,9 @@ function Cmd-Use([string[]]$Rest) {
     if (-not $name) { Die "usage: cx use <name>" }
     Ensure-Dirs
     if (-not (Test-Path -LiteralPath (Get-ProfileAuth $name))) { Die "profile has no auth.json: $name; run: cx login $name" }
+    $current = Get-CurrentProfile
+    if ($name -eq $current) { "current: $name"; return }
+    Assert-NoActiveCodex "switch profiles"
     Save-ActiveAuthIfKnown
     Stage-ProfileAuth $name
     Set-CurrentProfile $name
@@ -721,17 +724,13 @@ function Cmd-Run([string[]]$Rest) {
     $name = Require-CurrentProfile
     if (-not (Test-Path -LiteralPath (Get-ProfileAuth $name))) { Die "profile has no auth.json: $name; run: cx login $name" }
 
-    $runtimeHome = $null
-    try {
-        $runtimeHome = New-RuntimeCodexHome $name
-        $runStart = [datetime]::UtcNow
-        $status = Invoke-CodexWithEnv $name $codexArgs $runtimeHome
-        Store-ProfileAuthFromPath $name (Join-Path $runtimeHome "auth.json")
-        Scan-LimitForProfile $name $runStart $runtimeHome
-        $global:LASTEXITCODE = $status
-    } finally {
-        Remove-RuntimeCodexHome $runtimeHome
-    }
+    Save-ActiveAuthIfKnown
+    Stage-ProfileAuth $name
+    $runStart = [datetime]::UtcNow
+    $status = Invoke-CodexWithEnv $name $codexArgs $CodexHome
+    Store-ProfileAuth $name
+    Scan-LimitForProfile $name $runStart $CodexHome
+    $global:LASTEXITCODE = $status
 }
 
 function Cmd-HookCommand {
