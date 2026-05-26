@@ -119,14 +119,14 @@ Press **↑ / ↓** to navigate, **Enter** to confirm, **Esc** to cancel.
 ```
   Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)
   ───────────────────────────────────────────────────────────────────────
-  * main                   ok        5h 97% left, weekly 48% left cached 4m ago
-    work                   ok        5h 22% left, weekly 59% left cached 2h ago  !hit until 2026-05-26 09:00
+  * main                   ok        5h 97% left @06:15 | W 48% left @Sun 05:45 (4m)
+    work                   ok        5h 22% left @03:59 | W 59% left @Sun 10:06 (2h)  !hit until 2026-05-26 09:00
     personal               ok
 ```
 
 - `*` marks the currently active profile
 - `ok` means the profile has a saved login
-- usage values show remaining quota and are cached unless you run `cx switch --live`
+- usage values show remaining quota; `@` is the local reset time and the final age is when the cache was refreshed
 - `!hit until …` means that account hit a rate limit and when it resets
 
 If there are active Codex processes when you press Enter, they are killed before the profile file is swapped. You do not need to close Codex manually.
@@ -162,8 +162,8 @@ If a limit was hit, it records when it resets:
 
 ```
 CURRENT  PROFILE   LOGIN   EMAIL                  PLAN   USAGE                                      LIMIT
-*        main      ok      ma***@example.com      plus   5h 97% left, weekly 48% left cached 4m ago -
-         work      ok      wo***@example.com      team   5h 22% left, weekly 59% left cached 2h ago hit until 2026-05-26 09:00
+*        main      ok      ma***@example.com      plus   5h 97% left @06:15 | W 48% left @Sun 05:45 (4m) -
+         work      ok      wo***@example.com      team   5h 22% left @03:59 | W 59% left @Sun 10:06 (2h) hit until 2026-05-26 09:00
 ```
 
 The marker clears automatically when the reset time passes. To clear it manually:

@@ -102,6 +102,29 @@ format_epoch() {
         printf '%s\n' "$epoch"
 }
 
+format_reset_short() {
+    local epoch="$1"
+    [ -n "$epoch" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    if date -d "@$epoch" '+%Y-%m-%d' >/dev/null 2>&1; then
+        if [ "$(date -d "@$epoch" '+%Y-%m-%d')" = "$(date '+%Y-%m-%d')" ]; then
+            date -d "@$epoch" '+%H:%M'
+        else
+            date -d "@$epoch" '+%a %H:%M'
+        fi
+    elif date -r "$epoch" '+%Y-%m-%d' >/dev/null 2>&1; then
+        if [ "$(date -r "$epoch" '+%Y-%m-%d')" = "$(date '+%Y-%m-%d')" ]; then
+            date -r "$epoch" '+%H:%M'
+        else
+            date -r "$epoch" '+%a %H:%M'
+        fi
+    else
+        printf '%s\n' "$epoch"
+    fi
+}
+
 now_epoch() {
     date +%s
 }
@@ -556,7 +579,7 @@ write_usage_cache() {
 
 usage_status() {
     local name="$1"
-    local file primary secondary checked age label
+    local file primary secondary primary_reset secondary_reset checked age label
     file="$(usage_file "$name")"
     [ -f "$file" ] || {
         printf -- '-\n'
@@ -565,11 +588,13 @@ usage_status() {
 
     primary="$(format_remaining_number "$(read_usage_value "$file" primary_used_percent)")"
     secondary="$(format_remaining_number "$(read_usage_value "$file" secondary_used_percent)")"
-    label="5h ${primary}% left, weekly ${secondary}% left"
+    primary_reset="$(format_reset_short "$(read_usage_value "$file" primary_reset_at)")"
+    secondary_reset="$(format_reset_short "$(read_usage_value "$file" secondary_reset_at)")"
+    label="5h ${primary}% left @${primary_reset} | W ${secondary}% left @${secondary_reset}"
     checked="$(read_usage_value "$file" checked_at)"
     age="$(format_age "$checked" 2>/dev/null || true)"
     if [ -n "$age" ]; then
-        printf '%s cached %s ago\n' "$label" "$age"
+        printf '%s (%s)\n' "$label" "$age"
     else
         printf '%s\n' "$label"
     fi
@@ -905,9 +930,9 @@ draw_switch_menu() {
         line="$(printf '  %s %-20s %-8s%s%s' "$mark" "$name" "$login" "$usage_text" "$limit_text")"
 
         if [ "$i" -eq "$selected" ]; then
-            printf '\033[7m%-96s\033[0m\n' "$line" >&3
+            printf '\033[7m%-108s\033[0m\n' "$line" >&3
         else
-            printf '%-96s\n' "$line" >&3
+            printf '%-108s\n' "$line" >&3
         fi
     done
 
@@ -1094,7 +1119,7 @@ cmd_list() {
         refresh_usage_for_profiles "${names[@]}"
     fi
 
-    printf '%-8s %-24s %-10s %-28s %-10s %-32s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'USAGE' 'LIMIT'
+    printf '%-8s %-24s %-10s %-28s %-10s %-54s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'USAGE' 'LIMIT'
     for dir in "${dirs[@]}"; do
         name="$(basename "$dir")"
         mark=""
@@ -1104,7 +1129,7 @@ cmd_list() {
         usage="$(usage_status "$name")"
         meta="$(profile_metadata "$name")"
         IFS=$'\t' read -r mode email plan account_id expires_at <<< "$meta"
-        printf '%-8s %-24s %-10s %-28s %-10s %-32s %s\n' "$mark" "$name" "$login" "$(mask_email "${email:-}")" "${plan:--}" "$usage" "$limit"
+        printf '%-8s %-24s %-10s %-28s %-10s %-54s %s\n' "$mark" "$name" "$login" "$(mask_email "${email:-}")" "${plan:--}" "$usage" "$limit"
     done | sort -k2
 }
 
@@ -1170,6 +1195,8 @@ cmd_info() {
     printf 'account_id=%s\n' "$(mask_id "${account_id:-}")"
     printf 'subscription_expires_at=%s\n' "${expires_at:--}"
     printf 'usage=%s\n' "$(usage_status "$name")"
+    printf 'five_hour_resets_at=%s\n' "$(format_epoch "$(read_usage_value "$(usage_file "$name")" primary_reset_at)" 2>/dev/null || printf -- '-')"
+    printf 'weekly_resets_at=%s\n' "$(format_epoch "$(read_usage_value "$(usage_file "$name")" secondary_reset_at)" 2>/dev/null || printf -- '-')"
     printf 'limit=%s\n' "$limit"
     printf 'profile_dir=%s\n' "$(profile_dir "$name")"
 }

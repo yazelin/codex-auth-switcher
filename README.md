@@ -204,12 +204,12 @@ codex
 
 ```text
 CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       USAGE                            LIMIT
-*        main                     ok         ma***@example.com            plus       5h 97% left, weekly 48% left cached 4m ago -
-         team-a                   ok         te***@example.com            team       5h 22% left, weekly 59% left cached 2h ago hit until 2026-05-25 17:06
+*        main                     ok         ma***@example.com            plus       5h 97% left @06:15 | W 48% left @Sun 05:45 (4m) -
+         team-a                   ok         te***@example.com            team       5h 22% left @03:59 | W 59% left @Sun 10:06 (2h) hit until 2026-05-25 17:06
          coworker-1               not-login  -                            -          -                                -
 ```
 
-`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. `USAGE` is a cached remaining 5-hour and weekly usage snapshot. Email and account IDs are masked for terminal display.
+`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. `USAGE` shows cached remaining 5-hour and weekly quota; `@` is the local reset time and the final age is when the cache was refreshed. Email and account IDs are masked for terminal display.
 
 Use `cx usage` or `cx list --live` when you want fresh usage. Live refresh sends each selected profile's ChatGPT access token to `https://chatgpt.com/backend-api/wham/usage`, then stores the result in:
 
@@ -230,7 +230,9 @@ email=ma***@example.com
 plan=plus
 account_id=acc_1234...cdef
 subscription_expires_at=2026-04-23T05:03:38+00:00
-usage=5h 97% left, weekly 48% left cached 4m ago
+usage=5h 97% left @06:15 | W 48% left @Sun 05:45 (4m)
+five_hour_resets_at=2026-05-27 06:15
+weekly_resets_at=2026-05-31 05:45
 limit=-
 profile_dir=/home/me/.codex_auth_profiles/main
 ```

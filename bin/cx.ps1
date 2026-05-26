@@ -116,6 +116,17 @@ function Format-Epoch([string]$Epoch) {
     }
 }
 
+function Format-ResetShort([string]$Epoch) {
+    if ([string]::IsNullOrWhiteSpace($Epoch)) { return "-" }
+    try {
+        $dto = [DateTimeOffset]::FromUnixTimeSeconds([int64]$Epoch).ToLocalTime()
+        if ($dto.Date -eq [DateTimeOffset]::Now.Date) { return $dto.ToString("HH:mm") }
+        return $dto.ToString("ddd HH:mm")
+    } catch {
+        return $Epoch
+    }
+}
+
 function Get-NowEpoch {
     [DateTimeOffset]::Now.ToUnixTimeSeconds()
 }
@@ -519,10 +530,20 @@ function Get-UsageStatus([string]$Name) {
     if ($map.Count -eq 0) { return "-" }
     $primary = Format-RemainingNumber $map["primary_used_percent"]
     $secondary = Format-RemainingNumber $map["secondary_used_percent"]
-    $label = "5h ${primary}% left, weekly ${secondary}% left"
+    $primaryReset = Format-ResetShort $map["primary_reset_at"]
+    $secondaryReset = Format-ResetShort $map["secondary_reset_at"]
+    $label = "5h ${primary}% left @$primaryReset | W ${secondary}% left @$secondaryReset"
     $age = Format-Age $map["checked_at"]
-    if ($age) { return "$label cached $age ago" }
+    if ($age) { return "$label ($age)" }
     $label
+}
+
+function Get-UsageResetMap([string]$Name) {
+    $map = Read-KeyValueMap (Get-UsageFile $Name)
+    [PSCustomObject]@{
+        Primary = Format-Epoch $map["primary_reset_at"]
+        Secondary = Format-Epoch $map["secondary_reset_at"]
+    }
 }
 
 function Refresh-UsageForProfile([string]$Name, [bool]$Quiet = $false) {
@@ -837,11 +858,11 @@ function Cmd-List([string[]]$Rest) {
     )
     if ($live) { Refresh-UsageForProfiles $names }
 
-    "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-32} {6}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "USAGE", "LIMIT"
+    "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-54} {6}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "USAGE", "LIMIT"
     foreach ($name in $names) {
         $mark = if ($name -eq $current) { "*" } else { "" }
         $meta = Get-ProfileMetadata $name
-        "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-32} {6}" -f $mark, $name, (Get-AuthState $name), (Mask-Email $meta.Email), $meta.Plan, (Get-UsageStatus $name), (Get-LimitStatus $name)
+        "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-54} {6}" -f $mark, $name, (Get-AuthState $name), (Mask-Email $meta.Email), $meta.Plan, (Get-UsageStatus $name), (Get-LimitStatus $name)
     }
 }
 
@@ -852,6 +873,7 @@ function Cmd-Info([string[]]$Rest) {
 
     $current = Get-CurrentProfile
     $meta = Get-ProfileMetadata $name
+    $resets = Get-UsageResetMap $name
     "profile=$name"
     "current=$(if ($name -eq $current) { "yes" } else { "no" })"
     "login=$(Get-AuthState $name)"
@@ -861,6 +883,8 @@ function Cmd-Info([string[]]$Rest) {
     "account_id=$(Mask-Id $meta.AccountId)"
     "subscription_expires_at=$($meta.SubscriptionExpiresAt)"
     "usage=$(Get-UsageStatus $name)"
+    "five_hour_resets_at=$($resets.Primary)"
+    "weekly_resets_at=$($resets.Secondary)"
     "limit=$(Get-LimitStatus $name)"
     "profile_dir=$(Get-ProfileDir $name)"
 }
@@ -1006,7 +1030,7 @@ function Cmd-Switch([string[]]$Rest) {
             $r = $rows[$i]
             $limitStr = if ($r.Limit -eq "-") { "" } else { "  !$($r.Limit)" }
             $usageStr = if ($r.Usage -eq "-") { "" } else { "  $($r.Usage)" }
-            $line = ("  {0} {1,-20} {2,-8}{3}{4}" -f $r.Mark, $r.Name, $r.Auth, $usageStr, $limitStr).PadRight(96)
+            $line = ("  {0} {1,-20} {2,-8}{3}{4}" -f $r.Mark, $r.Name, $r.Auth, $usageStr, $limitStr).PadRight(108)
             if ($i -eq $Sel) {
                 Write-Host $line -BackgroundColor DarkCyan -ForegroundColor White
             } else {
