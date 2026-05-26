@@ -786,9 +786,11 @@ cmd_switch() {
 
     while IFS= read -r dir; do
         name="$(basename "$dir")"
-        [ "$name" = ".lock" ] && continue
+        case "$name" in
+            .lock|.runtime) continue ;;
+        esac
         profile_names+=("$name")
-    done < <(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' -print 2>/dev/null | sort)
+    done < <(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' ! -name '.runtime' -print 2>/dev/null | sort)
 
     [ "${#profile_names[@]}" -gt 0 ] || die "no profiles found; run: cx import <name>"
 
