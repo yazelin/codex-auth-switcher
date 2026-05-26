@@ -4,4 +4,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$script_dir/.." && pwd)"
 
-"$repo_dir/bin/cx" scan-limit "${CODEX_AUTH_PROFILE:-}"
+if [ -n "${CODEX_AUTH_PROFILE:-}" ]; then
+    "$repo_dir/bin/cx" scan-limit "$CODEX_AUTH_PROFILE" || true
+else
+    "$repo_dir/bin/cx" scan-limit || true
+fi
+
+exit 0

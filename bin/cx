@@ -41,7 +41,7 @@ environment:
   CX_CODEX_HOME             Default: $CODEX_HOME or ~/.codex
   CX_CODEX_BIN              Optional path to the real codex executable
   CX_LIMIT_THRESHOLD        Default: 100
-  CX_ALLOW_ACTIVE_CODEX     Set to 1 to switch even if Codex is running
+  CX_ALLOW_ACTIVE_CODEX     Set to 1 to login even if Codex is running
 EOF
 }
 
@@ -157,6 +157,57 @@ store_profile_auth() {
     mkdir -p "$(profile_dir "$name")"
     cp "$(shared_auth)" "$(profile_auth "$name")"
     secure_auth_file "$(profile_auth "$name")"
+}
+
+store_profile_auth_from_file() {
+    local name="$1"
+    local auth="$2"
+    [ -f "$auth" ] || return 0
+    mkdir -p "$(profile_dir "$name")"
+    cp "$auth" "$(profile_auth "$name")"
+    secure_auth_file "$(profile_auth "$name")"
+}
+
+runtime_root() {
+    printf '%s/.runtime\n' "$CX_PROFILES_DIR"
+}
+
+prepare_runtime_codex_home() {
+    local name="$1"
+    local root runtime auth entry base
+    root="$(runtime_root)"
+    runtime="$root/run-$$-$(date +%s)-${RANDOM:-0}"
+    auth="$(profile_auth "$name")"
+
+    mkdir -p "$runtime"
+    cp "$auth" "$runtime/auth.json"
+    secure_auth_file "$runtime/auth.json"
+
+    if [ -d "$CX_CODEX_HOME" ]; then
+        while IFS= read -r entry; do
+            [ -e "$entry" ] || continue
+            base="$(basename "$entry")"
+            case "$base" in
+                auth.json|sessions|history.jsonl|logs_*.sqlite) continue ;;
+            esac
+
+            ln -s "$entry" "$runtime/$base" 2>/dev/null ||
+                cp -R "$entry" "$runtime/$base" 2>/dev/null ||
+                true
+        done < <(find "$CX_CODEX_HOME" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
+    fi
+
+    printf '%s\n' "$runtime"
+}
+
+cleanup_runtime_codex_home() {
+    local runtime="$1"
+    local root
+    [ -n "$runtime" ] || return 0
+    root="$(runtime_root)"
+    case "$runtime" in
+        "$root"/run-*) rm -rf -- "$runtime" ;;
+    esac
 }
 
 set_current_profile() {
@@ -361,7 +412,7 @@ assert_no_active_codex() {
     active="$(active_codex_processes || true)"
     [ -z "$active" ] && return 0
 
-    printf 'cx: refusing to switch auth while another Codex session is active\n' >&2
+    printf 'cx: refusing to login while another Codex session is active\n' >&2
     printf 'cx: run `cx ps` for details, or set CX_ALLOW_ACTIVE_CODEX=1 to override\n' >&2
     printf '%s\n' "$active" | awk -F '\t' '{ printf "  pid=%s tty=%s command=%s\n", $2, $3, $4 }' >&2
     exit 1
@@ -438,7 +489,8 @@ clear_limit_if_present() {
 }
 
 latest_session_file() {
-    local dir="$CX_CODEX_HOME/sessions"
+    local home="${1:-$CX_CODEX_HOME}"
+    local dir="$home/sessions"
     [ -d "$dir" ] || return 1
 
     local latest
@@ -506,10 +558,11 @@ parse_rate_limits_fallback() {
 
 scan_limit_for_profile() {
     local name="$1"
+    local home="${2:-$CX_CODEX_HOME}"
     local session record reached primary_used primary_reset secondary_used secondary_reset plan
     local hit_type="" reset_at=""
 
-    session="$(latest_session_file || true)"
+    session="$(latest_session_file "$home" || true)"
     [ -n "$session" ] || return 0
 
     record="$(parse_rate_limits_with_jq "$session" || parse_rate_limits_fallback "$session" || true)"
@@ -615,7 +668,6 @@ cmd_use() {
     [ -n "$name" ] || die "usage: cx use <name>"
     ensure_dirs
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
-    assert_no_active_codex
     save_active_auth_if_known
     stage_profile_auth "$name"
     set_current_profile "$name"
@@ -798,7 +850,9 @@ cmd_list() {
     printf '%-8s %-24s %-10s %-28s %-10s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'LIMIT'
     for dir in "$CX_PROFILES_DIR"/*; do
         [ -d "$dir" ] || continue
-        [ "$(basename "$dir")" = ".lock" ] && continue
+        case "$(basename "$dir")" in
+            .lock|.runtime) continue ;;
+        esac
         name="$(basename "$dir")"
         mark=""
         [ "$name" = "$current" ] && mark="*"
@@ -840,22 +894,21 @@ cmd_run() {
     fi
 
     ensure_dirs
-    local name codex_bin status
+    local name codex_bin status runtime_home
     name="$(require_current_profile)"
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
 
-    acquire_lock
-    assert_no_active_codex
-    stage_profile_auth "$name"
+    runtime_home="$(prepare_runtime_codex_home "$name")"
     codex_bin="$(find_codex_bin)"
 
     set +e
-    CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
+    CODEX_HOME="$runtime_home" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
     status=$?
     set -e
 
-    store_profile_auth "$name"
-    scan_limit_for_profile "$name" || true
+    store_profile_auth_from_file "$name" "$runtime_home/auth.json"
+    scan_limit_for_profile "$name" "$runtime_home" || true
+    cleanup_runtime_codex_home "$runtime_home"
     return "$status"
 }
 
@@ -895,7 +948,7 @@ cmd_doctor() {
     ensure_dirs
     local current profile_count rows active_count background_count codex_bin
     current="$(current_profile)"
-    profile_count="$(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' 2>/dev/null | wc -l | tr -d ' ')"
+    profile_count="$(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' ! -name '.runtime' 2>/dev/null | wc -l | tr -d ' ')"
     rows="$(codex_process_rows || true)"
     active_count="$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "active" { count++ } END { print count + 0 }')"
     background_count="$(printf '%s\n' "$rows" | awk -F '\t' '$1 == "background" { count++ } END { print count + 0 }')"
@@ -918,7 +971,7 @@ cmd_export() {
     [ -n "$dest" ] || die "usage: cx export <archive.tgz>"
     ensure_dirs
     mkdir -p "$(dirname "$dest")"
-    tar --exclude='./.lock' -czf "$dest" -C "$CX_PROFILES_DIR" .
+    tar --exclude='./.lock' --exclude='./.runtime' -czf "$dest" -C "$CX_PROFILES_DIR" .
     chmod 600 "$dest" 2>/dev/null || true
     printf 'exported profiles to: %s\n' "$dest"
 }

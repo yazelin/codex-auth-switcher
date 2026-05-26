@@ -93,7 +93,7 @@ Press **↑ / ↓** to navigate, **Enter** to confirm, **Esc** to cancel.
 |---|---|
 | `cx import <name>` | Save the current `~/.codex/auth.json` as a profile |
 | `cx login <name>` | Open Codex login flow for a new profile |
-| `cx use <name>` | Switch to a profile (blocks if Codex is running) |
+| `cx use <name>` | Switch the shared active profile |
 | `cx switch` | Interactive TUI switcher — kills Codex first |
 | `cx kill` | Kill all active Codex processes |
 | `cx list` | List all profiles with login status, email, plan, and limit |
@@ -134,17 +134,18 @@ If there are active Codex processes when you press Enter, they are killed before
 
 Only `~/.codex/auth.json` is switched between profiles.
 
-Everything else is shared across all profiles on the same machine:
+Wrapped `codex` runs use a temporary per-process `CODEX_HOME`, so multiple Codex sessions can run at the same time without racing on the shared `auth.json`.
+
+Configuration and reusable resources are shared across all profiles on the same machine:
 
 | Item | Shared |
 |---|---|
 | `~/.codex/config.toml` | ✓ yes |
 | `~/.codex/hooks.json` | ✓ yes |
-| `~/.codex/sessions/` | ✓ yes |
-| `~/.codex/history.jsonl` | ✓ yes |
+| `~/.codex_auth_profiles/.runtime/run-.../sessions/` | per wrapped run |
 | `~/.codex/auth.json` | — switched per profile |
 
-This means skills, memories, session history, and config are the same regardless of which account you are using.
+This means skills, memories, and config are the same regardless of which account you are using, while each wrapped Codex process keeps its own auth/session runtime.
 
 ---
 

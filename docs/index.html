@@ -648,7 +648,7 @@
         <tr><td><code>cx kill</code><span class="badge-new">NEW</span></td><td>立即關閉所有正在運行的 Codex 程序</td></tr>
         <tr><td><code>cx import &lt;名稱&gt;</code></td><td>把目前登入狀態存成 profile</td></tr>
         <tr><td><code>cx login &lt;名稱&gt;</code></td><td>開啟 Codex 登入，存成新 profile</td></tr>
-        <tr><td><code>cx use &lt;名稱&gt;</code></td><td>切換到指定 profile（Codex 若在跑會拒絕）</td></tr>
+        <tr><td><code>cx use &lt;名稱&gt;</code></td><td>切換共用的 active profile</td></tr>
         <tr><td><code>cx list</code></td><td>列出所有 profile 及其狀態</td></tr>
         <tr><td><code>cx info [名稱]</code></td><td>顯示單一 profile 詳細資訊</td></tr>
         <tr><td><code>cx current</code></td><td>顯示目前使用中的 profile 名稱</td></tr>
@@ -712,7 +712,7 @@
     <details>
       <summary>兩個帳號可以同時開著 Codex 嗎？</summary>
       <div class="faq-body">
-        <p>不行。這個工具共用一個 <code>~/.codex/auth.json</code>，同時跑兩個 Codex 會造成 auth 混亂。切換前請先關閉 Codex，或用 <code>cx switch</code>（會自動幫你關）。</p>
+        <p>可以。透過 <code>codex</code> wrapper 啟動時，每個 Codex process 都會拿到自己的暫存 <code>CODEX_HOME</code> 和該 profile 的 <code>auth.json</code>，所以可以雙開或三開，也可以先 <code>cx use</code> 切到另一個 profile 再開新的 Codex。只有 <code>cx login</code> 這類登入流程仍會在 Codex 執行中拒絕。</p>
       </div>
     </details>
 

@@ -36,7 +36,7 @@ environment:
   CX_CODEX_HOME             Default: `$CODEX_HOME or ~/.codex
   CX_CODEX_BIN              Optional path to the real codex executable
   CX_LIMIT_THRESHOLD        Default: 100
-  CX_ALLOW_ACTIVE_CODEX     Set to 1 to switch even if Codex is running
+  CX_ALLOW_ACTIVE_CODEX     Set to 1 to login even if Codex is running
 "@
 }
 
@@ -170,6 +170,60 @@ function Store-ProfileAuth([string]$Name) {
     if (-not (Test-Path -LiteralPath $shared)) { return }
     New-Item -ItemType Directory -Force -Path (Get-ProfileDir $Name) | Out-Null
     Copy-Item -LiteralPath $shared -Destination (Get-ProfileAuth $Name) -Force
+}
+
+function Store-ProfileAuthFromPath([string]$Name, [string]$AuthPath) {
+    if (-not (Test-Path -LiteralPath $AuthPath)) { return }
+    New-Item -ItemType Directory -Force -Path (Get-ProfileDir $Name) | Out-Null
+    Copy-Item -LiteralPath $AuthPath -Destination (Get-ProfileAuth $Name) -Force
+}
+
+function Get-RuntimeRoot {
+    Join-Path $ProfilesDir ".runtime"
+}
+
+function Copy-CodexHomeEntryToRuntime([System.IO.FileSystemInfo]$Entry, [string]$RuntimeHome) {
+    $name = $Entry.Name
+    if ($name -eq "auth.json" -or $name -eq "sessions" -or $name -eq "history.jsonl" -or $name -like "logs_*.sqlite") {
+        return
+    }
+
+    $destination = Join-Path $RuntimeHome $name
+    try {
+        New-Item -ItemType SymbolicLink -Path $destination -Target $Entry.FullName -ErrorAction Stop | Out-Null
+        return
+    } catch {
+        Copy-Item -LiteralPath $Entry.FullName -Destination $destination -Recurse:$Entry.PSIsContainer -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function New-RuntimeCodexHome([string]$Name) {
+    $root = Get-RuntimeRoot
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $runtime = Join-Path $root ("run-{0}-{1}" -f $PID, ([Guid]::NewGuid().ToString("N")))
+    New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+    Copy-Item -LiteralPath (Get-ProfileAuth $Name) -Destination (Join-Path $runtime "auth.json") -Force
+
+    if (Test-Path -LiteralPath $CodexHome -PathType Container) {
+        Get-ChildItem -LiteralPath $CodexHome -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-CodexHomeEntryToRuntime $_ $runtime }
+    }
+
+    $runtime
+}
+
+function Remove-RuntimeCodexHome([string]$RuntimeHome) {
+    if ([string]::IsNullOrWhiteSpace($RuntimeHome)) { return }
+    $root = Get-RuntimeRoot
+    try {
+        $resolvedRuntime = (Resolve-Path -LiteralPath $RuntimeHome -ErrorAction Stop).Path
+        $resolvedRoot = (Resolve-Path -LiteralPath $root -ErrorAction Stop).Path
+        $rootPrefix = $resolvedRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        if ($resolvedRuntime.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path -Leaf $resolvedRuntime).StartsWith("run-")) {
+            Remove-Item -LiteralPath $resolvedRuntime -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
 }
 
 function Set-CurrentProfile([string]$Name) {
@@ -336,7 +390,7 @@ function Assert-NoActiveCodex {
     $active = @(Get-CodexProcesses | Where-Object { $_.Kind -eq "active" })
     if ($active.Count -eq 0) { return }
 
-    [Console]::Error.WriteLine("cx: refusing to switch auth while another Codex session is active")
+    [Console]::Error.WriteLine("cx: refusing to login while another Codex session is active")
     $active | ForEach-Object {
         [Console]::Error.WriteLine(("  pid={0} command={1}" -f $_.PID, $_.Command))
     }
@@ -400,8 +454,8 @@ function Clear-Limit([string]$Name) {
 }
 
 function Get-LatestSessionFile {
-    param([datetime]$After = [datetime]::MinValue)
-    $sessionDir = Join-Path $CodexHome "sessions"
+    param([datetime]$After = [datetime]::MinValue, [string]$HomePath = $CodexHome)
+    $sessionDir = Join-Path $HomePath "sessions"
     if (-not (Test-Path -LiteralPath $sessionDir)) { return $null }
     Get-ChildItem -LiteralPath $sessionDir -Recurse -Filter "*.jsonl" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTimeUtc -gt $After.ToUniversalTime() } |
@@ -437,8 +491,8 @@ function Max-Epoch([string]$A, [string]$B) {
     if ([int64]$A -ge [int64]$B) { $A } else { $B }
 }
 
-function Scan-LimitForProfile([string]$Name, [datetime]$After = [datetime]::MinValue) {
-    $session = Get-LatestSessionFile -After $After
+function Scan-LimitForProfile([string]$Name, [datetime]$After = [datetime]::MinValue, [string]$HomePath = $CodexHome) {
+    $session = Get-LatestSessionFile -After $After -HomePath $HomePath
     $rate = Get-LastRateLimitRecord $session
     if (-not $rate) { return }
 
@@ -489,12 +543,12 @@ function Scan-LimitForProfile([string]$Name, [datetime]$After = [datetime]::MinV
     }
 }
 
-function Invoke-CodexWithEnv([string]$Profile, [string[]]$CodexArgs = @()) {
+function Invoke-CodexWithEnv([string]$Profile, [string[]]$CodexArgs = @(), [string]$RunCodexHome = $CodexHome) {
     $codexBin = Find-CodexBin
     $oldCodexHome = $env:CODEX_HOME
     $oldAuthProfile = $env:CODEX_AUTH_PROFILE
     try {
-        $env:CODEX_HOME = $CodexHome
+        $env:CODEX_HOME = $RunCodexHome
         $env:CODEX_AUTH_PROFILE = $Profile
         # Start-Process -NoNewWindow shares the current console window with the child
         # process, ensuring Node.js isTTY = true. The & operator inside a running
@@ -571,7 +625,6 @@ function Cmd-Use([string[]]$Rest) {
     if (-not $name) { Die "usage: cx use <name>" }
     Ensure-Dirs
     if (-not (Test-Path -LiteralPath (Get-ProfileAuth $name))) { Die "profile has no auth.json: $name; run: cx login $name" }
-    Assert-NoActiveCodex
     Save-ActiveAuthIfKnown
     Stage-ProfileAuth $name
     Set-CurrentProfile $name
@@ -597,7 +650,7 @@ function Cmd-List {
     $current = Get-CurrentProfile
     "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "LIMIT"
     Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne ".lock" } |
+        Where-Object { $_.Name -ne ".lock" -and $_.Name -ne ".runtime" } |
         Sort-Object Name |
         ForEach-Object {
             $name = $_.Name
@@ -644,17 +697,16 @@ function Cmd-Run([string[]]$Rest) {
     $name = Require-CurrentProfile
     if (-not (Test-Path -LiteralPath (Get-ProfileAuth $name))) { Die "profile has no auth.json: $name; run: cx login $name" }
 
-    Acquire-Lock
+    $runtimeHome = $null
     try {
-        Assert-NoActiveCodex
-        Stage-ProfileAuth $name
+        $runtimeHome = New-RuntimeCodexHome $name
         $runStart = [datetime]::UtcNow
-        $status = Invoke-CodexWithEnv $name $codexArgs
-        Store-ProfileAuth $name
-        Scan-LimitForProfile $name $runStart
+        $status = Invoke-CodexWithEnv $name $codexArgs $runtimeHome
+        Store-ProfileAuthFromPath $name (Join-Path $runtimeHome "auth.json")
+        Scan-LimitForProfile $name $runStart $runtimeHome
         $global:LASTEXITCODE = $status
     } finally {
-        Release-Lock
+        Remove-RuntimeCodexHome $runtimeHome
     }
 }
 
@@ -704,7 +756,7 @@ function Cmd-Switch {
 
     $profileNames = @(
         Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne ".lock" } |
+        Where-Object { $_.Name -ne ".lock" -and $_.Name -ne ".runtime" } |
         Sort-Object Name |
         ForEach-Object { $_.Name }
     )
@@ -800,7 +852,7 @@ function Cmd-Switch {
 function Cmd-Doctor {
     Ensure-Dirs
     $current = Get-CurrentProfile
-    $profiles = @(Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne ".lock" })
+    $profiles = @(Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne ".lock" -and $_.Name -ne ".runtime" })
     $processes = @(Get-CodexProcesses)
     $active = @($processes | Where-Object { $_.Kind -eq "active" })
     $background = @($processes | Where-Object { $_.Kind -eq "background" })
@@ -826,7 +878,7 @@ function Cmd-Export([string[]]$Rest) {
     if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     $tar = Get-Command tar -ErrorAction SilentlyContinue
     if (-not $tar) { Die "tar is required for cx export" }
-    & $tar.Source --exclude "./.lock" -czf $dest -C $ProfilesDir .
+    & $tar.Source --exclude "./.lock" --exclude "./.runtime" -czf $dest -C $ProfilesDir .
     if ($LASTEXITCODE -ne 0) { Die "tar export failed" }
     "exported profiles to: $dest"
 }

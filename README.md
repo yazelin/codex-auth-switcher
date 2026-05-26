@@ -23,18 +23,16 @@ The installer clones the repo, wires up your shell profile, and prints a first-t
 
 ---
 
-Small shell tooling for managing multiple Codex ChatGPT auth identities on one computer while keeping one shared Codex home.
+Small shell tooling for managing multiple Codex ChatGPT auth identities on one computer while keeping your normal Codex configuration shared.
 
-The design intentionally shares all Codex context:
+The design intentionally shares the Codex configuration and reusable local resources:
 
 - `~/.codex/config.toml`
 - `~/.codex/hooks.json`
-- `~/.codex/sessions/`
-- `~/.codex/history.jsonl`
-- `~/.codex/logs_*.sqlite`
 - plugins, skills, memories, and other state
 
 Only `~/.codex/auth.json` is switched between named auth profiles.
+Wrapped `codex` runs use a temporary per-process `CODEX_HOME` so multiple Codex sessions can run at the same time without racing on `auth.json`.
 
 ## Platform Support
 
@@ -47,16 +45,24 @@ The behavior and storage format are the same on both platforms. Windows uses Pow
 
 ## Layout
 
-Shared Codex state stays where Codex already expects it:
+Shared Codex state stays where Codex already expects it. Wrapped `codex` runs mirror this state into a temporary runtime home for each process:
 
 ```text
 ~/.codex/
   auth.json        # currently active auth only
   config.toml      # shared
   hooks.json       # shared
-  sessions/        # shared
-  history.jsonl    # shared
-  logs_*.sqlite    # shared
+  sessions/        # direct Codex sessions
+  history.jsonl    # direct Codex history
+  logs_*.sqlite    # direct Codex logs
+```
+
+```text
+~/.codex_auth_profiles/.runtime/run-.../
+  auth.json        # selected profile auth for this Codex process
+  config.toml      # linked or copied from ~/.codex
+  hooks.json       # linked or copied from ~/.codex
+  sessions/        # this run's sessions
 ```
 
 Stored auth profiles live separately.
@@ -138,7 +144,7 @@ Both shell integrations give you:
 - `cx`: profile manager
 - `codex`: shell function wrapper that runs Codex through `cx`
 
-The wrapper is required because it copies the selected profile auth into `~/.codex/auth.json` before Codex starts, then saves any refreshed token back after Codex exits.
+The wrapper is required because it launches Codex with the selected profile auth in an isolated temporary `CODEX_HOME`, then saves any refreshed token back after Codex exits.
 
 ## First-Time Setup
 
@@ -245,7 +251,7 @@ Codex session JSONL files can include `rate_limits` data:
 }
 ```
 
-After each wrapped `codex` run, `cx` scans the latest shared session file. If a rate limit was reached, it writes:
+After each wrapped `codex` run, `cx` scans that run's session file. If a rate limit was reached, it writes:
 
 ```text
 ~/.codex_auth_profiles/<name>/.limit
@@ -344,30 +350,28 @@ Add that command to the `Stop` section of `%USERPROFILE%\.codex\hooks.json`:
 
 ## Concurrency
 
-This tool uses one shared `~/.codex/auth.json`, so it takes a lock while running Codex through `cx`.
+Wrapped `codex` runs are concurrency-safe. Each launch gets a temporary runtime `CODEX_HOME` under `~/.codex_auth_profiles/.runtime/` with that profile's `auth.json`, while shared config and reusable resources are linked or copied in.
 
-That means you should not run two different auth profiles at the same time in the same shared Codex home. The lock prevents accidental overlapping `cx` runs because overlapping would make `auth.json` ambiguous.
+That means you can open two or three Codex sessions at the same time, including sessions that were started under different profiles.
 
-`cx use`, `cx login`, and wrapped `codex` runs also check for other active Codex processes before changing `auth.json`.
+`cx use` is safe while Codex is running because wrapped sessions use their own runtime homes. `cx login` still checks for other active Codex processes before starting a login flow. `cx switch` intentionally kills active Codex processes before switching the shared active profile.
 
 ```bash
 cx ps
 cx doctor
 ```
 
-`cx ps` lists detected Codex processes as `active` or `background`. `active` processes block switching by default. `background` processes such as app-server or IDE helper processes are shown but do not block.
+`cx ps` lists detected Codex processes as `active` or `background`. `active` processes block login by default and are killed by `cx switch`. `background` processes such as app-server or IDE helper processes are shown but do not block.
 
 To override the process guard:
 
 ```bash
-CX_ALLOW_ACTIVE_CODEX=1 cx use <name>
 CX_ALLOW_ACTIVE_CODEX=1 cx login <name>
 ```
 
 PowerShell — set the variable then run the command on the same line with `;`:
 
 ```powershell
-$env:CX_ALLOW_ACTIVE_CODEX = "1"; cx use <name>
 $env:CX_ALLOW_ACTIVE_CODEX = "1"; cx login <name>
 ```
 
@@ -375,7 +379,7 @@ Or across two lines if you prefer:
 
 ```powershell
 $env:CX_ALLOW_ACTIVE_CODEX = "1"
-cx use <name>
+cx login <name>
 ```
 
 > **PowerShell 5.1 pitfalls** — the following bash-style patterns do not work and will error:
@@ -447,7 +451,7 @@ Windows:
 $env:CX_CODEX_HOME = "$HOME\.codex"
 ```
 
-Allow switching while active Codex processes are detected:
+Allow login while active Codex processes are detected:
 
 ```bash
 export CX_ALLOW_ACTIVE_CODEX=1

@@ -30,7 +30,7 @@ Borrowed ideas implemented in this repo:
 
 - Parse ChatGPT `id_token` claims to derive masked email, plan type, subscription expiry, and account id when available.
 - Keep the displayed profile name user-controlled even when metadata exists.
-- Detect active Codex processes before switching, because shared `auth.json` is unsafe during concurrent runs.
+- Keep login flows guarded while letting wrapped `cx run` launch with an isolated runtime home, so concurrent runs do not race on `auth.json`.
 - Treat usage/limit state as account-specific metadata, not shared Codex-home metadata.
 - Preserve `CODEX_HOME` override support.
 - Set restrictive file permissions for stored auth on Unix.
@@ -63,7 +63,7 @@ Stay with the minimal design:
     .limit
 ```
 
-`cx run` copies the selected profile auth into `~/.codex/auth.json`, runs Codex, saves refreshed auth back to that profile, then scans the latest session for `rate_limits`.
+`cx run` copies the selected profile auth into a temporary per-process `CODEX_HOME`, runs Codex, saves refreshed auth back to that profile, then scans that run's session for `rate_limits`.
 
 ## Possible Future Enhancements
 
