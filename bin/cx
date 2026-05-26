@@ -28,10 +28,11 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
-  cx switch                 Interactive profile switcher (kills Codex first)
+  cx switch [--live]        Interactive profile switcher (kills Codex first)
   cx kill                   Kill all active Codex processes
   cx remove <name>          Remove a saved auth profile
-  cx list                   List profiles, login, metadata, and limit state
+  cx list [--live]          List profiles, login, metadata, usage, and limit state
+  cx usage [name|--all]     Refresh live usage from ChatGPT and cache it
   cx info [name]            Show metadata for one profile
   cx current                Print active profile
   cx run -- [codex args]    Run codex with the active auth profile
@@ -463,10 +464,169 @@ limit_file() {
     printf '%s/.limit\n' "$(profile_dir "$1")"
 }
 
+usage_file() {
+    printf '%s/.usage\n' "$(profile_dir "$1")"
+}
+
 read_limit_value() {
     local file="$1"
     local key="$2"
     sed -n "s/^${key}=//p" "$file" 2>/dev/null | sed -n '1p'
+}
+
+read_usage_value() {
+    local file="$1"
+    local key="$2"
+    sed -n "s/^${key}=//p" "$file" 2>/dev/null | sed -n '1p'
+}
+
+format_usage_number() {
+    local value="${1:-}"
+    [ -n "$value" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    awk -v n="$value" 'BEGIN {
+        if (n == "" || n == "-") { print "-"; exit }
+        if (n == int(n)) { printf "%d\n", n; exit }
+        printf "%.1f\n", n
+    }' 2>/dev/null || printf '%s\n' "$value"
+}
+
+format_remaining_number() {
+    local value="${1:-}"
+    [ -n "$value" ] && [ "$value" != "-" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    awk -v n="$value" 'BEGIN {
+        left = 100 - n
+        if (left < 0) { left = 0 }
+        if (left == int(left)) { printf "%d\n", left; exit }
+        printf "%.1f\n", left
+    }' 2>/dev/null || printf -- '-\n'
+}
+
+format_age() {
+    local epoch="$1"
+    local now age
+    [ -n "$epoch" ] || return 1
+    now="$(now_epoch)"
+    age=$((now - epoch))
+    [ "$age" -lt 0 ] && age=0
+    if [ "$age" -lt 60 ]; then
+        printf '%ss\n' "$age"
+    elif [ "$age" -lt 3600 ]; then
+        printf '%sm\n' "$((age / 60))"
+    elif [ "$age" -lt 86400 ]; then
+        printf '%sh\n' "$((age / 3600))"
+    else
+        printf '%sd\n' "$((age / 86400))"
+    fi
+}
+
+write_usage_cache() {
+    local name="$1"
+    local plan="${2:-}"
+    local primary_used="${3:-0}"
+    local primary_reset="${4:-}"
+    local primary_window="${5:-}"
+    local secondary_used="${6:-0}"
+    local secondary_reset="${7:-}"
+    local secondary_window="${8:-}"
+    local reached="${9:-}"
+    local source="${10:-api}"
+    local file
+
+    mkdir -p "$(profile_dir "$name")"
+    file="$(usage_file "$name")"
+    {
+        printf 'checked_at=%s\n' "$(now_epoch)"
+        printf 'source=%s\n' "$source"
+        [ -n "$plan" ] && printf 'plan=%s\n' "$plan"
+        printf 'primary_used_percent=%s\n' "$(format_usage_number "$primary_used")"
+        [ -n "$primary_reset" ] && printf 'primary_reset_at=%s\n' "$primary_reset"
+        [ -n "$primary_window" ] && printf 'primary_window_seconds=%s\n' "$primary_window"
+        printf 'secondary_used_percent=%s\n' "$(format_usage_number "$secondary_used")"
+        [ -n "$secondary_reset" ] && printf 'secondary_reset_at=%s\n' "$secondary_reset"
+        [ -n "$secondary_window" ] && printf 'secondary_window_seconds=%s\n' "$secondary_window"
+        [ -n "$reached" ] && [ "$reached" != "null" ] && printf 'rate_limit_reached_type=%s\n' "$reached"
+    } > "$file"
+}
+
+usage_status() {
+    local name="$1"
+    local file primary secondary checked age label
+    file="$(usage_file "$name")"
+    [ -f "$file" ] || {
+        printf -- '-\n'
+        return 0
+    }
+
+    primary="$(format_remaining_number "$(read_usage_value "$file" primary_used_percent)")"
+    secondary="$(format_remaining_number "$(read_usage_value "$file" secondary_used_percent)")"
+    label="5h ${primary}% left, weekly ${secondary}% left"
+    checked="$(read_usage_value "$file" checked_at)"
+    age="$(format_age "$checked" 2>/dev/null || true)"
+    if [ -n "$age" ]; then
+        printf '%s cached %s ago\n' "$label" "$age"
+    else
+        printf '%s\n' "$label"
+    fi
+}
+
+refresh_usage_for_profile() {
+    local name="$1"
+    local quiet="${2:-0}"
+    local auth token body reached limit_reached primary_used primary_reset primary_window secondary_used secondary_reset secondary_window plan
+    auth="$(profile_auth "$name")"
+    [ -f "$auth" ] || {
+        [ "$quiet" = "1" ] || printf 'cx: profile has no auth.json: %s\n' "$name" >&2
+        return 1
+    }
+    command -v jq >/dev/null 2>&1 || die "jq is required for live usage refresh"
+    command -v curl >/dev/null 2>&1 || die "curl is required for live usage refresh"
+
+    token="$(jq -r '.tokens.access_token // empty' "$auth" 2>/dev/null || true)"
+    [ -n "$token" ] || {
+        [ "$quiet" = "1" ] || printf 'cx: no ChatGPT access_token for profile: %s\n' "$name" >&2
+        return 1
+    }
+
+    body="$(curl -fsS -H "Authorization: Bearer $token" -H 'Accept: application/json' \
+        'https://chatgpt.com/backend-api/wham/usage' 2>/dev/null)" || {
+        [ "$quiet" = "1" ] || printf 'cx: usage refresh failed for %s\n' "$name" >&2
+        return 1
+    }
+
+    plan="$(printf '%s\n' "$body" | jq -r '.plan_type // empty')"
+    primary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.used_percent // 0')"
+    primary_reset="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.reset_at // empty')"
+    primary_window="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.limit_window_seconds // empty')"
+    secondary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.used_percent // 0')"
+    secondary_reset="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.reset_at // empty')"
+    secondary_window="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.limit_window_seconds // empty')"
+    reached="$(printf '%s\n' "$body" | jq -r '.rate_limit_reached_type // .rate_limit.rate_limit_reached_type // empty')"
+    limit_reached="$(printf '%s\n' "$body" | jq -r '.rate_limit.limit_reached // false')"
+
+    write_usage_cache "$name" "$plan" "$primary_used" "$primary_reset" "$primary_window" "$secondary_used" "$secondary_reset" "$secondary_window" "$reached" "api"
+
+    if [ -n "$reached" ] && [ "$reached" != "null" ]; then
+        case "$reached" in
+            primary) write_limit "$name" "$reached" "$primary_reset" "api" ;;
+            secondary) write_limit "$name" "$reached" "$secondary_reset" "api" ;;
+            *) write_limit "$name" "$reached" "$(max_epoch "$primary_reset" "$secondary_reset")" "api" ;;
+        esac
+    elif [ "$limit_reached" = "false" ]; then
+        clear_limit_if_present "$name"
+    fi
+}
+
+refresh_usage_for_profiles() {
+    local name
+    for name in "$@"; do
+        refresh_usage_for_profile "$name" 1 || true
+    done
 }
 
 limit_status() {
@@ -610,6 +770,7 @@ scan_limit_for_profile() {
     [ -n "$record" ] || return 0
 
     IFS=$'\t' read -r reached primary_used primary_reset secondary_used secondary_reset plan <<< "$record"
+    write_usage_cache "$name" "$plan" "$primary_used" "$primary_reset" "" "$secondary_used" "$secondary_reset" "" "$reached" "session-scan"
 
     case "$reached" in
         primary)
@@ -724,7 +885,7 @@ draw_switch_menu() {
     local selected="$1"
     local current="$2"
     local title="  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)"
-    local i name mark login limit limit_text line
+    local i name mark login limit usage usage_text limit_text line
 
     printf '\033[H\033[2J' >&3
     printf '\033[36m%s\033[0m\n' "$title" >&3
@@ -736,14 +897,17 @@ draw_switch_menu() {
         [ "$name" = "$current" ] && mark="*"
         login="$(auth_state "$name")"
         limit="$(limit_status "$name")"
+        usage="$(usage_status "$name")"
+        usage_text=""
+        [ "$usage" != "-" ] && usage_text="  $usage"
         limit_text=""
         [ "$limit" != "-" ] && limit_text="  !$limit"
-        line="$(printf '  %s %-20s %-8s%s' "$mark" "$name" "$login" "$limit_text")"
+        line="$(printf '  %s %-20s %-8s%s%s' "$mark" "$name" "$login" "$usage_text" "$limit_text")"
 
         if [ "$i" -eq "$selected" ]; then
-            printf '\033[7m%-72s\033[0m\n' "$line" >&3
+            printf '\033[7m%-96s\033[0m\n' "$line" >&3
         else
-            printf '%-72s\n' "$line" >&3
+            printf '%-96s\n' "$line" >&3
         fi
     done
 
@@ -780,6 +944,15 @@ switch_terminal_cleanup() {
 
 cmd_switch() {
     ensure_dirs
+    local live=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --live) live=1 ;;
+            -h|--help) printf 'usage: cx switch [--live]\n'; return 0 ;;
+            *) die "unknown option for switch: $1; usage: cx switch [--live]" ;;
+        esac
+        shift
+    done
 
     if ! { exec 3<>/dev/tty; } 2>/dev/null; then
         die "cx switch requires an interactive terminal; use: cx use <name>"
@@ -799,6 +972,7 @@ cmd_switch() {
     done < <(find "$CX_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.lock' ! -name '.runtime' -print 2>/dev/null | sort)
 
     [ "${#profile_names[@]}" -gt 0 ] || die "no profiles found; run: cx import <name>"
+    [ "$live" -eq 1 ] && refresh_usage_for_profiles "${profile_names[@]}"
 
     for i in "${!profile_names[@]}"; do
         if [ "${profile_names[$i]}" = "$current" ]; then
@@ -892,24 +1066,87 @@ cmd_current() {
 
 cmd_list() {
     ensure_dirs
-    local current name dir mark login limit meta mode email plan account_id expires_at
+    local current name dir mark login limit usage meta mode email plan account_id expires_at live=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --live) live=1 ;;
+            -h|--help) printf 'usage: cx list [--live]\n'; return 0 ;;
+            *) die "unknown option for list: $1; usage: cx list [--live]" ;;
+        esac
+        shift
+    done
     current="$(current_profile)"
 
-    printf '%-8s %-24s %-10s %-28s %-10s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'LIMIT'
+    local -a dirs=()
     for dir in "$CX_PROFILES_DIR"/*; do
         [ -d "$dir" ] || continue
         case "$(basename "$dir")" in
             .lock|.runtime) continue ;;
         esac
+        dirs+=("$dir")
+    done
+
+    if [ "$live" -eq 1 ]; then
+        local -a names=()
+        for dir in "${dirs[@]}"; do
+            names+=("$(basename "$dir")")
+        done
+        refresh_usage_for_profiles "${names[@]}"
+    fi
+
+    printf '%-8s %-24s %-10s %-28s %-10s %-32s %s\n' 'CURRENT' 'PROFILE' 'LOGIN' 'EMAIL' 'PLAN' 'USAGE' 'LIMIT'
+    for dir in "${dirs[@]}"; do
         name="$(basename "$dir")"
         mark=""
         [ "$name" = "$current" ] && mark="*"
         login="$(auth_state "$name")"
         limit="$(limit_status "$name")"
+        usage="$(usage_status "$name")"
         meta="$(profile_metadata "$name")"
         IFS=$'\t' read -r mode email plan account_id expires_at <<< "$meta"
-        printf '%-8s %-24s %-10s %-28s %-10s %s\n' "$mark" "$name" "$login" "$(mask_email "${email:-}")" "${plan:--}" "$limit"
+        printf '%-8s %-24s %-10s %-28s %-10s %-32s %s\n' "$mark" "$name" "$login" "$(mask_email "${email:-}")" "${plan:--}" "$usage" "$limit"
     done | sort -k2
+}
+
+cmd_usage() {
+    ensure_dirs
+    local target="${1:---all}"
+    if [ "$#" -gt 1 ]; then
+        die "usage: cx usage [name|--all]"
+    fi
+    case "$target" in
+        -h|--help)
+            printf 'usage: cx usage [name|--all]\n'
+            return 0
+            ;;
+        --all) ;;
+        --*) die "unknown option for usage: $target; usage: cx usage [name|--all]" ;;
+    esac
+
+    local -a names=()
+    local dir name ok
+    if [ "$target" = "--all" ]; then
+        for dir in "$CX_PROFILES_DIR"/*; do
+            [ -d "$dir" ] || continue
+            case "$(basename "$dir")" in
+                .lock|.runtime) continue ;;
+            esac
+            names+=("$(basename "$dir")")
+        done
+    else
+        names+=("$target")
+    fi
+    [ "${#names[@]}" -gt 0 ] || die "no profiles found; run: cx import <name>"
+
+    printf '%-24s %-10s %s\n' 'PROFILE' 'UPDATED' 'USAGE'
+    for name in "${names[@]}"; do
+        if refresh_usage_for_profile "$name" 0; then
+            ok=yes
+        else
+            ok=no
+        fi
+        printf '%-24s %-10s %s\n' "$name" "$ok" "$(usage_status "$name")"
+    done
 }
 
 cmd_info() {
@@ -932,6 +1169,7 @@ cmd_info() {
     printf 'plan=%s\n' "${plan:--}"
     printf 'account_id=%s\n' "$(mask_id "${account_id:-}")"
     printf 'subscription_expires_at=%s\n' "${expires_at:--}"
+    printf 'usage=%s\n' "$(usage_status "$name")"
     printf 'limit=%s\n' "$limit"
     printf 'profile_dir=%s\n' "$(profile_dir "$name")"
 }
@@ -1052,6 +1290,7 @@ main() {
         kill) cmd_kill "$@" ;;
         remove|rm|delete) cmd_remove "$@" ;;
         list|ls) cmd_list "$@" ;;
+        usage) cmd_usage "$@" ;;
         info) cmd_info "$@" ;;
         current) cmd_current "$@" ;;
         run) cmd_run "$@" ;;

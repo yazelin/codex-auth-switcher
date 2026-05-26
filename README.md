@@ -66,12 +66,15 @@ Linux/macOS:
   current
   main/
     auth.json
+    .usage
     .limit
   team-a/
     auth.json
+    .usage
     .limit
   coworker-1/
     auth.json
+    .usage
     .limit
 ```
 
@@ -82,12 +85,15 @@ Windows:
   current
   main\
     auth.json
+    .usage
     .limit
   team-a\
     auth.json
+    .usage
     .limit
   coworker-1\
     auth.json
+    .usage
     .limit
 ```
 
@@ -176,8 +182,12 @@ Linux/macOS and Windows use the same commands:
 
 ```bash
 cx switch               # interactive profile switcher — kills Codex first
+cx switch --live        # refresh usage for all profiles before switching
 cx kill                 # kill all active Codex processes
 cx list
+cx list --live          # refresh usage for all profiles before listing
+cx usage                # refresh usage for all profiles
+cx usage <name>         # refresh usage for one profile
 cx info <name>
 cx use <name>
 cx remove <name>
@@ -193,13 +203,21 @@ codex
 `cx list` shows:
 
 ```text
-CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       LIMIT
-*        main                     ok         ma***@example.com            plus       -
-         team-a                   ok         te***@example.com            team       hit until 2026-05-25 17:06
-         coworker-1               not-login  -                            -          -
+CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       USAGE                            LIMIT
+*        main                     ok         ma***@example.com            plus       5h 97% left, weekly 48% left cached 4m ago -
+         team-a                   ok         te***@example.com            team       5h 22% left, weekly 59% left cached 2h ago hit until 2026-05-25 17:06
+         coworker-1               not-login  -                            -          -                                -
 ```
 
-`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. Email and account IDs are masked for terminal display.
+`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. `USAGE` is a cached remaining 5-hour and weekly usage snapshot. Email and account IDs are masked for terminal display.
+
+Use `cx usage` or `cx list --live` when you want fresh usage. Live refresh sends each selected profile's ChatGPT access token to `https://chatgpt.com/backend-api/wham/usage`, then stores the result in:
+
+```text
+~/.codex_auth_profiles/<name>/.usage
+```
+
+Plain `cx list` and `cx switch` do not call the network; they display the latest cached `.usage` value if one exists.
 
 `cx info <name>` shows one profile in key-value form:
 
@@ -212,6 +230,7 @@ email=ma***@example.com
 plan=plus
 account_id=acc_1234...cdef
 subscription_expires_at=2026-04-23T05:03:38+00:00
+usage=5h 97% left, weekly 48% left cached 4m ago
 limit=-
 profile_dir=/home/me/.codex_auth_profiles/main
 ```
@@ -243,7 +262,7 @@ Codex session JSONL files can include `rate_limits` data:
 }
 ```
 
-After each wrapped `codex` run, `cx` scans that run's session file. If a rate limit was reached, it writes:
+After each wrapped `codex` run, `cx` scans that run's session file. If usage data is present, it updates the cached `.usage` snapshot. If a rate limit was reached, it writes:
 
 ```text
 ~/.codex_auth_profiles/<name>/.limit
@@ -460,6 +479,8 @@ $env:CX_ALLOW_ACTIVE_CODEX = "1"
 This tool does not automatically switch to another account after a limit is reached. It records which profile appears limited and when it should reset, then lets you choose the next profile with `cx use <name>`.
 
 Auth profiles contain tokens. Do not commit `~/.codex_auth_profiles` or any `auth.json` file.
+
+Live usage refresh is opt-in. `cx usage`, `cx list --live`, and `cx switch --live` call a ChatGPT backend endpoint with the selected profile tokens; plain `cx list` and `cx switch` only read local cache.
 
 ## Prior Art
 

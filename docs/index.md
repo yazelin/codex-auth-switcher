@@ -94,9 +94,11 @@ Press **↑ / ↓** to navigate, **Enter** to confirm, **Esc** to cancel.
 | `cx import <name>` | Save the current `~/.codex/auth.json` as a profile |
 | `cx login <name>` | Open Codex login flow for a new profile |
 | `cx use <name>` | Switch the shared active profile |
+| `cx switch --live` | Refresh usage for all profiles before opening the switcher |
 | `cx switch` | Interactive TUI switcher — kills Codex first |
 | `cx kill` | Kill all active Codex processes |
-| `cx list` | List all profiles with login status, email, plan, and limit |
+| `cx list [--live]` | List all profiles with login status, email, plan, usage, and limit |
+| `cx usage [name\|--all]` | Refresh live usage; no argument refreshes all profiles |
 | `cx info [name]` | Detailed info for one profile |
 | `cx current` | Print the currently active profile name |
 | `cx remove <name>` | Delete a saved profile |
@@ -117,13 +119,14 @@ Press **↑ / ↓** to navigate, **Enter** to confirm, **Esc** to cancel.
 ```
   Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)
   ───────────────────────────────────────────────────────────────────────
-  * main                   ok
-    work                   ok       !hit until 2026-05-26 09:00
+  * main                   ok        5h 97% left, weekly 48% left cached 4m ago
+    work                   ok        5h 22% left, weekly 59% left cached 2h ago  !hit until 2026-05-26 09:00
     personal               ok
 ```
 
 - `*` marks the currently active profile
 - `ok` means the profile has a saved login
+- usage values show remaining quota and are cached unless you run `cx switch --live`
 - `!hit until …` means that account hit a rate limit and when it resets
 
 If there are active Codex processes when you press Enter, they are killed before the profile file is swapped. You do not need to close Codex manually.
@@ -152,13 +155,15 @@ This means skills, memories, config, and resume history are shared for the activ
 
 ## Rate Limit Tracking
 
-After each `codex` run, the tool scans the latest session file for rate-limit data.  
+After each `codex` run, the tool scans the latest session file for rate-limit data.
+If usage data is present, it updates the local `.usage` cache. Use `cx usage`, `cx list --live`, or `cx switch --live` to refresh directly from ChatGPT; plain `cx list` and `cx switch` only show cached usage and do not call the network.
+
 If a limit was hit, it records when it resets:
 
 ```
-CURRENT  PROFILE   LOGIN   EMAIL                  PLAN   LIMIT
-*        main      ok      ma***@example.com      plus   -
-         work      ok      wo***@example.com      team   hit until 2026-05-26 09:00
+CURRENT  PROFILE   LOGIN   EMAIL                  PLAN   USAGE                                      LIMIT
+*        main      ok      ma***@example.com      plus   5h 97% left, weekly 48% left cached 4m ago -
+         work      ok      wo***@example.com      team   5h 22% left, weekly 59% left cached 2h ago hit until 2026-05-26 09:00
 ```
 
 The marker clears automatically when the reset time passes. To clear it manually:

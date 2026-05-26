@@ -623,8 +623,8 @@
       </div>
       <div class="demo-body"><span class="demo-header-line">  Codex Profile Switcher  (Up/Down: navigate | Enter: switch | Esc: cancel)
 </span><span class="demo-divider">  ─────────────────────────────────────────────────────────────
-</span>  <span class="demo-cur">*</span> <span class="demo-active"> main       ok                                   </span>
-    work       ok       <span class="demo-limit">!hit until 2026-05-27 09:00</span>
+</span>  <span class="demo-cur">*</span> <span class="demo-active"> main       ok       5h 97% left, weekly 48% left cached 4m ago</span>
+    work       ok       5h 22% left, weekly 59% left cached 2h ago  <span class="demo-limit">!hit until 2026-05-27 09:00</span>
     personal   ok</div>
     </div>
     <p style="text-align:center;font-size:.825rem;color:var(--text-dim);margin-top:1rem">
@@ -644,12 +644,13 @@
         <tr><th>指令</th><th>功能說明</th></tr>
       </thead>
       <tbody>
-        <tr><td><code>cx switch</code><span class="badge-new">NEW</span></td><td>互動選單切換帳號，自動先關閉 Codex</td></tr>
+        <tr><td><code>cx switch [--live]</code><span class="badge-new">NEW</span></td><td>互動選單切換帳號，自動先關閉 Codex；<code>--live</code> 會先更新用量</td></tr>
         <tr><td><code>cx kill</code><span class="badge-new">NEW</span></td><td>立即關閉所有正在運行的 Codex 程序</td></tr>
         <tr><td><code>cx import &lt;名稱&gt;</code></td><td>把目前登入狀態存成 profile</td></tr>
         <tr><td><code>cx login &lt;名稱&gt;</code></td><td>開啟 Codex 登入，存成新 profile</td></tr>
         <tr><td><code>cx use &lt;名稱&gt;</code></td><td>切換共用的 active profile</td></tr>
-        <tr><td><code>cx list</code></td><td>列出所有 profile 及其狀態</td></tr>
+        <tr><td><code>cx list [--live]</code></td><td>列出所有 profile 及其狀態；<code>--live</code> 會先更新用量</td></tr>
+        <tr><td><code>cx usage [name|--all]</code></td><td>更新 live usage；不帶參數時更新全部 profile</td></tr>
         <tr><td><code>cx info [名稱]</code></td><td>顯示單一 profile 詳細資訊</td></tr>
         <tr><td><code>cx current</code></td><td>顯示目前使用中的 profile 名稱</td></tr>
         <tr><td><code>cx remove &lt;名稱&gt;</code></td><td>刪除一個 profile</td></tr>

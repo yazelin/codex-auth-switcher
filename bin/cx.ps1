@@ -27,10 +27,11 @@ usage:
   cx import <name>          Save current ~/.codex/auth.json as a profile
   cx login <name> [args]    Login or refresh a profile
   cx use <name>             Switch active auth profile
-  cx switch                 Interactive profile switcher (kills Codex first)
+  cx switch [--live]        Interactive profile switcher (kills Codex first)
   cx kill                   Kill all active Codex processes
   cx remove <name>          Remove a saved auth profile
-  cx list                   List profiles, login, metadata, and limit state
+  cx list [--live]          List profiles, login, metadata, usage, and limit state
+  cx usage [name|--all]     Refresh live usage from ChatGPT and cache it
   cx info [name]            Show metadata for one profile
   cx current                Print active profile
   cx run -- [codex args]    Run codex with the active auth profile
@@ -58,7 +59,7 @@ function Die([string]$Message) {
 }
 
 function First-Arg([string[]]$List) {
-    if ($List.Count -gt 0) { return $List[0] }
+    foreach ($item in $List) { return $item }
     ""
 }
 
@@ -425,6 +426,10 @@ function Get-LimitFile([string]$Name) {
     Join-Path (Get-ProfileDir $Name) ".limit"
 }
 
+function Get-UsageFile([string]$Name) {
+    Join-Path (Get-ProfileDir $Name) ".usage"
+}
+
 function Read-LimitMap([string]$File) {
     $map = @{}
     if (-not (Test-Path -LiteralPath $File)) { return $map }
@@ -434,6 +439,147 @@ function Read-LimitMap([string]$File) {
         }
     }
     $map
+}
+
+function Read-KeyValueMap([string]$File) {
+    $map = @{}
+    if (-not (Test-Path -LiteralPath $File)) { return $map }
+    foreach ($line in Get-Content -LiteralPath $File) {
+        if ($line -match '^([^=]+)=(.*)$') {
+            $map[$matches[1]] = $matches[2]
+        }
+    }
+    $map
+}
+
+function Format-UsageNumber($Value) {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return "-" }
+    try {
+        $n = [double]$Value
+        if ([Math]::Abs($n - [Math]::Round($n)) -lt 0.05) { return ([Math]::Round($n)).ToString("0") }
+        return $n.ToString("0.#")
+    } catch {
+        return [string]$Value
+    }
+}
+
+function Format-RemainingNumber($Value) {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value) -or [string]$Value -eq "-") { return "-" }
+    try {
+        return Format-UsageNumber ([Math]::Max(0, 100.0 - [double]$Value))
+    } catch {
+        return "-"
+    }
+}
+
+function Format-Age([string]$Epoch) {
+    if ([string]::IsNullOrWhiteSpace($Epoch)) { return "" }
+    try {
+        $age = [Math]::Max(0, (Get-NowEpoch) - [int64]$Epoch)
+        if ($age -lt 60) { return "${age}s" }
+        if ($age -lt 3600) { return "$([Math]::Floor($age / 60))m" }
+        if ($age -lt 86400) { return "$([Math]::Floor($age / 3600))h" }
+        return "$([Math]::Floor($age / 86400))d"
+    } catch {
+        return ""
+    }
+}
+
+function Write-UsageCache(
+    [string]$Name,
+    [string]$Plan,
+    $PrimaryUsed,
+    $PrimaryResetAt,
+    $PrimaryWindowSeconds,
+    $SecondaryUsed,
+    $SecondaryResetAt,
+    $SecondaryWindowSeconds,
+    [string]$ReachedType = "",
+    [string]$Source = "api"
+) {
+    New-Item -ItemType Directory -Force -Path (Get-ProfileDir $Name) | Out-Null
+    $file = Get-UsageFile $Name
+    $lines = @(
+        "checked_at=$(Get-NowEpoch)",
+        "source=$Source",
+        $(if ($Plan) { "plan=$Plan" }),
+        "primary_used_percent=$(Format-UsageNumber $PrimaryUsed)",
+        $(if ($PrimaryResetAt) { "primary_reset_at=$PrimaryResetAt" }),
+        $(if ($PrimaryWindowSeconds) { "primary_window_seconds=$PrimaryWindowSeconds" }),
+        "secondary_used_percent=$(Format-UsageNumber $SecondaryUsed)",
+        $(if ($SecondaryResetAt) { "secondary_reset_at=$SecondaryResetAt" }),
+        $(if ($SecondaryWindowSeconds) { "secondary_window_seconds=$SecondaryWindowSeconds" }),
+        $(if ($ReachedType) { "rate_limit_reached_type=$ReachedType" })
+    ) | Where-Object { $_ }
+    Set-Content -LiteralPath $file -Value $lines
+}
+
+function Get-UsageStatus([string]$Name) {
+    $map = Read-KeyValueMap (Get-UsageFile $Name)
+    if ($map.Count -eq 0) { return "-" }
+    $primary = Format-RemainingNumber $map["primary_used_percent"]
+    $secondary = Format-RemainingNumber $map["secondary_used_percent"]
+    $label = "5h ${primary}% left, weekly ${secondary}% left"
+    $age = Format-Age $map["checked_at"]
+    if ($age) { return "$label cached $age ago" }
+    $label
+}
+
+function Refresh-UsageForProfile([string]$Name, [bool]$Quiet = $false) {
+    $authPath = Get-ProfileAuth $Name
+    if (-not (Test-Path -LiteralPath $authPath)) {
+        if (-not $Quiet) { Write-Warning "cx: profile has no auth.json: $Name" }
+        return $false
+    }
+
+    try {
+        $auth = Get-Content -LiteralPath $authPath -Raw | ConvertFrom-Json -ErrorAction Stop
+        $tokens = Get-Prop $auth "tokens"
+        $token = Get-Prop $tokens "access_token"
+        if (-not $token) {
+            if (-not $Quiet) { Write-Warning "cx: no ChatGPT access_token for profile: $Name" }
+            return $false
+        }
+
+        $resp = Invoke-RestMethod -Method Get -Uri "https://chatgpt.com/backend-api/wham/usage" -Headers @{
+            Authorization = "Bearer $token"
+            Accept = "application/json"
+        } -ErrorAction Stop
+
+        $rate = Get-Prop $resp "rate_limit"
+        $primary = Get-Prop $rate "primary_window"
+        $secondary = Get-Prop $rate "secondary_window"
+        $reached = [string](Get-Prop $resp "rate_limit_reached_type")
+        if (-not $reached) { $reached = [string](Get-Prop $rate "rate_limit_reached_type") }
+
+        Write-UsageCache $Name `
+            ([string](Get-Prop $resp "plan_type")) `
+            (Get-Prop $primary "used_percent") `
+            (Get-Prop $primary "reset_at") `
+            (Get-Prop $primary "limit_window_seconds") `
+            (Get-Prop $secondary "used_percent") `
+            (Get-Prop $secondary "reset_at") `
+            (Get-Prop $secondary "limit_window_seconds") `
+            $reached `
+            "api"
+
+        if ($reached) {
+            $resetAt = if ($reached -eq "primary") { Get-Prop $primary "reset_at" } elseif ($reached -eq "secondary") { Get-Prop $secondary "reset_at" } else { Max-Epoch (Get-Prop $primary "reset_at") (Get-Prop $secondary "reset_at") }
+            Write-Limit $Name $reached ([string]$resetAt) "api"
+        } elseif ($rate -and -not [bool](Get-Prop $rate "limit_reached")) {
+            Clear-Limit $Name
+        }
+        return $true
+    } catch {
+        if (-not $Quiet) { Write-Warning "cx: usage refresh failed for ${Name}: $_" }
+        return $false
+    }
+}
+
+function Refresh-UsageForProfiles([string[]]$Names) {
+    foreach ($name in $Names) {
+        [void](Refresh-UsageForProfile $name $true)
+    }
 }
 
 function Get-LimitStatus([string]$Name) {
@@ -527,10 +673,13 @@ function Scan-LimitForProfile([string]$Name, [datetime]$After = [datetime]::MinV
     $primaryResetValue = Get-Prop $primary "resets_at"
     $secondaryUsedValue = Get-Prop $secondary "used_percent"
     $secondaryResetValue = Get-Prop $secondary "resets_at"
+    if ($null -eq $secondaryResetValue) { $secondaryResetValue = Get-Prop $secondary "reset_at" }
+    if ($null -eq $primaryResetValue) { $primaryResetValue = Get-Prop $primary "reset_at" }
     $primaryUsed = if ($null -ne $primaryUsedValue) { [double]$primaryUsedValue } else { 0.0 }
     $primaryReset = if ($null -ne $primaryResetValue) { [string]$primaryResetValue } else { "" }
     $secondaryUsed = if ($null -ne $secondaryUsedValue) { [double]$secondaryUsedValue } else { 0.0 }
     $secondaryReset = if ($null -ne $secondaryResetValue) { [string]$secondaryResetValue } else { "" }
+    Write-UsageCache $Name ([string](Get-Prop $rate "plan_type")) $primaryUsed $primaryReset (Get-Prop $primary "window_duration_mins") $secondaryUsed $secondaryReset (Get-Prop $secondary "window_duration_mins") $reached "session-scan"
 
     $hitType = ""
     $resetAt = ""
@@ -672,19 +821,28 @@ function Cmd-Remove([string[]]$Rest) {
     "removed profile: $name"
 }
 
-function Cmd-List {
+function Cmd-List([string[]]$Rest) {
     Ensure-Dirs
     $current = Get-CurrentProfile
-    "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "LIMIT"
-    Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
+    foreach ($arg in $Rest) {
+        if ($arg -eq "-h" -or $arg -eq "--help") { "usage: cx list [--live]"; return }
+        if ($arg -ne "--live") { Die "unknown option for list: $arg; usage: cx list [--live]" }
+    }
+    $live = $Rest -contains "--live"
+    $names = @(
+        Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne ".lock" -and $_.Name -ne ".runtime" } |
         Sort-Object Name |
-        ForEach-Object {
-            $name = $_.Name
-            $mark = if ($name -eq $current) { "*" } else { "" }
-            $meta = Get-ProfileMetadata $name
-            "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5}" -f $mark, $name, (Get-AuthState $name), (Mask-Email $meta.Email), $meta.Plan, (Get-LimitStatus $name)
-        }
+        ForEach-Object { $_.Name }
+    )
+    if ($live) { Refresh-UsageForProfiles $names }
+
+    "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-32} {6}" -f "CURRENT", "PROFILE", "LOGIN", "EMAIL", "PLAN", "USAGE", "LIMIT"
+    foreach ($name in $names) {
+        $mark = if ($name -eq $current) { "*" } else { "" }
+        $meta = Get-ProfileMetadata $name
+        "{0,-8} {1,-24} {2,-10} {3,-28} {4,-10} {5,-32} {6}" -f $mark, $name, (Get-AuthState $name), (Mask-Email $meta.Email), $meta.Plan, (Get-UsageStatus $name), (Get-LimitStatus $name)
+    }
 }
 
 function Cmd-Info([string[]]$Rest) {
@@ -702,6 +860,7 @@ function Cmd-Info([string[]]$Rest) {
     "plan=$($meta.Plan)"
     "account_id=$(Mask-Id $meta.AccountId)"
     "subscription_expires_at=$($meta.SubscriptionExpiresAt)"
+    "usage=$(Get-UsageStatus $name)"
     "limit=$(Get-LimitStatus $name)"
     "profile_dir=$(Get-ProfileDir $name)"
 }
@@ -773,9 +932,44 @@ function Cmd-Kill {
     else { "Killed $killed active Codex process(es)." }
 }
 
-function Cmd-Switch {
+function Cmd-Usage([string[]]$Rest) {
+    Ensure-Dirs
+    $restCount = 0
+    foreach ($item in $Rest) { $restCount++ }
+    if ($restCount -gt 1) { Die "usage: cx usage [name|--all]" }
+    $target = First-Arg $Rest
+    if (-not $target) { $target = "--all" }
+    if ($target -eq "-h" -or $target -eq "--help") { "usage: cx usage [name|--all]"; return }
+    if ($target.StartsWith("--") -and $target -ne "--all") { Die "unknown option for usage: $target; usage: cx usage [name|--all]" }
+
+    $names = @()
+    if ($target -eq "--all") {
+        $names = @(
+            Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne ".lock" -and $_.Name -ne ".runtime" } |
+            Sort-Object Name |
+            ForEach-Object { $_.Name }
+        )
+    } else {
+        $names = @($target)
+    }
+    if ($names.Count -eq 0) { Die "no profiles found; run: cx import <name>" }
+
+    "{0,-24} {1,-10} {2}" -f "PROFILE", "UPDATED", "USAGE"
+    foreach ($name in $names) {
+        $ok = Refresh-UsageForProfile $name $false
+        "{0,-24} {1,-10} {2}" -f $name, $(if ($ok) { "yes" } else { "no" }), (Get-UsageStatus $name)
+    }
+}
+
+function Cmd-Switch([string[]]$Rest) {
     Ensure-Dirs
     $current = Get-CurrentProfile
+    foreach ($arg in $Rest) {
+        if ($arg -eq "-h" -or $arg -eq "--help") { "usage: cx switch [--live]"; return }
+        if ($arg -ne "--live") { Die "unknown option for switch: $arg; usage: cx switch [--live]" }
+    }
+    $live = $Rest -contains "--live"
 
     $profileNames = @(
         Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue |
@@ -785,6 +979,7 @@ function Cmd-Switch {
     )
 
     if ($profileNames.Count -eq 0) { Die "no profiles found; run: cx import <name>" }
+    if ($live) { Refresh-UsageForProfiles $profileNames }
 
     $selectedIdx = 0
     for ($i = 0; $i -lt $profileNames.Count; $i++) {
@@ -796,6 +991,7 @@ function Cmd-Switch {
             Name  = $pname
             Mark  = if ($pname -eq $current) { "*" } else { " " }
             Auth  = Get-AuthState $pname
+            Usage = Get-UsageStatus $pname
             Limit = Get-LimitStatus $pname
         }
     })
@@ -809,7 +1005,8 @@ function Cmd-Switch {
         for ($i = 0; $i -lt $rows.Count; $i++) {
             $r = $rows[$i]
             $limitStr = if ($r.Limit -eq "-") { "" } else { "  !$($r.Limit)" }
-            $line = ("  {0} {1,-20} {2,-8}{3}" -f $r.Mark, $r.Name, $r.Auth, $limitStr).PadRight(72)
+            $usageStr = if ($r.Usage -eq "-") { "" } else { "  $($r.Usage)" }
+            $line = ("  {0} {1,-20} {2,-8}{3}{4}" -f $r.Mark, $r.Name, $r.Auth, $usageStr, $limitStr).PadRight(96)
             if ($i -eq $Sel) {
                 Write-Host $line -BackgroundColor DarkCyan -ForegroundColor White
             } else {
@@ -921,47 +1118,53 @@ function Cmd-Restore([string[]]$Rest) {
 $cmd = if ($args.Count -gt 0) { $args[0] } else { "help" }
 $rest = if ($args.Count -gt 1) { @($args | Select-Object -Skip 1) } else { @() }
 
-switch ($cmd) {
-    "import" { Cmd-Import $rest }
-    "init" { Cmd-Import $rest }
-    "login" { Cmd-Login $rest }
-    "use" { Cmd-Use $rest }
-    "switch" { Cmd-Switch }
-    "kill" { Cmd-Kill }
-    "remove" { Cmd-Remove $rest }
-    "rm" { Cmd-Remove $rest }
-    "delete" { Cmd-Remove $rest }
-    "list" { Cmd-List }
-    "ls" { Cmd-List }
-    "info" { Cmd-Info $rest }
-    "current" { $name = Get-CurrentProfile; if (-not $name) { Die "no active profile" }; $name }
-    "run" { Cmd-Run $rest }
-    "ps" { Cmd-Ps }
-    "doctor" { Cmd-Doctor }
-    "export" { Cmd-Export $rest }
-    "restore" { Cmd-Restore $rest }
-    "scan-limit" {
-        Ensure-Dirs
-        $name = if ($rest.Count -gt 0 -and $rest[0]) { $rest[0] } else { Require-CurrentProfile }
-        Scan-LimitForProfile $name
+try {
+    switch ($cmd) {
+        "import" { Cmd-Import $rest }
+        "init" { Cmd-Import $rest }
+        "login" { Cmd-Login $rest }
+        "use" { Cmd-Use $rest }
+        "switch" { Cmd-Switch $rest }
+        "kill" { Cmd-Kill }
+        "remove" { Cmd-Remove $rest }
+        "rm" { Cmd-Remove $rest }
+        "delete" { Cmd-Remove $rest }
+        "list" { Cmd-List $rest }
+        "ls" { Cmd-List $rest }
+        "usage" { Cmd-Usage $rest }
+        "info" { Cmd-Info $rest }
+        "current" { $name = Get-CurrentProfile; if (-not $name) { Die "no active profile" }; $name }
+        "run" { Cmd-Run $rest }
+        "ps" { Cmd-Ps }
+        "doctor" { Cmd-Doctor }
+        "export" { Cmd-Export $rest }
+        "restore" { Cmd-Restore $rest }
+        "scan-limit" {
+            Ensure-Dirs
+            $name = if ($rest.Count -gt 0 -and $rest[0]) { $rest[0] } else { Require-CurrentProfile }
+            Scan-LimitForProfile $name
+        }
+        "limit" {
+            $name = First-Arg $rest
+            if (-not $name) { Die "usage: cx limit <name> [reset_epoch]" }
+            $resetAt = if ($rest.Count -gt 1) { $rest[1] } else { "" }
+            Write-Limit $name "manual" $resetAt "manual"
+        }
+        "ok" {
+            $name = First-Arg $rest
+            if (-not $name) { Die "usage: cx ok <name>" }
+            Clear-Limit $name
+        }
+        "hook-command" { Cmd-HookCommand }
+        "help" { Write-Usage }
+        "-h" { Write-Usage }
+        "--help" { Write-Usage }
+        default {
+            Write-Usage
+            Die "unknown command: $cmd"
+        }
     }
-    "limit" {
-        $name = First-Arg $rest
-        if (-not $name) { Die "usage: cx limit <name> [reset_epoch]" }
-        $resetAt = if ($rest.Count -gt 1) { $rest[1] } else { "" }
-        Write-Limit $name "manual" $resetAt "manual"
-    }
-    "ok" {
-        $name = First-Arg $rest
-        if (-not $name) { Die "usage: cx ok <name>" }
-        Clear-Limit $name
-    }
-    "hook-command" { Cmd-HookCommand }
-    "help" { Write-Usage }
-    "-h" { Write-Usage }
-    "--help" { Write-Usage }
-    default {
-        Write-Usage
-        throw "unknown command: $cmd"
-    }
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 }

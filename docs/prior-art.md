@@ -42,8 +42,8 @@ The upstream project is too large for this use case:
 
 - Tauri, React, Rust, pnpm, and build pipelines are unnecessary for a CLI-first workflow.
 - Direct OAuth login, browser dashboard, release tooling, encrypted import/export, and warmup requests are more surface area than needed.
-- Live usage polling requires network calls to ChatGPT backend endpoints, which is heavier and more brittle than reading Codex's existing session `rate_limits`.
-- It stores all accounts in a single app-specific JSON file, while this repo keeps each profile as a plain directory with its own `auth.json` and `.limit`.
+- Always-on live usage polling is heavier and more brittle than reading Codex's existing session `rate_limits`. This repo keeps live refresh explicit via `cx usage`, `cx list --live`, and `cx switch --live`.
+- It stores all accounts in a single app-specific JSON file, while this repo keeps each profile as a plain directory with its own `auth.json`, `.usage`, and `.limit`.
 
 ## Design Decision
 
@@ -60,10 +60,11 @@ Stay with the minimal design:
   current
   <name>/
     auth.json
+    .usage
     .limit
 ```
 
-`cx run` stages the selected profile auth into the shared Codex home, runs Codex there so `/resume` and history stay available, saves refreshed auth back to that profile, then scans the latest session for `rate_limits`.
+`cx run` stages the selected profile auth into the shared Codex home, runs Codex there so `/resume` and history stay available, saves refreshed auth back to that profile, then scans the latest session for `rate_limits`. Live usage refresh stays explicit and updates `.usage`.
 
 ## Possible Future Enhancements
 
