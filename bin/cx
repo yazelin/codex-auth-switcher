@@ -530,6 +530,12 @@ format_remaining_number() {
     }' 2>/dev/null || printf -- '-\n'
 }
 
+is_percent() {
+    awk -v n="${1:-}" 'BEGIN {
+        exit !(n != "" && n == n + 0 && n >= 0 && n <= 100)
+    }'
+}
+
 format_age() {
     local epoch="$1"
     local now age
@@ -575,19 +581,27 @@ write_usage_cache() {
         [ -n "$secondary_window" ] && printf 'secondary_window_seconds=%s\n' "$secondary_window"
         [ -n "$reached" ] && [ "$reached" != "null" ] && printf 'rate_limit_reached_type=%s\n' "$reached"
     } > "$file"
+    return 0
 }
 
 usage_status() {
     local name="$1"
-    local file primary secondary primary_reset secondary_reset checked age label
+    local file primary_used secondary_used primary secondary primary_reset secondary_reset checked age label
     file="$(usage_file "$name")"
     [ -f "$file" ] || {
         printf -- '-\n'
         return 0
     }
 
-    primary="$(format_remaining_number "$(read_usage_value "$file" primary_used_percent)")"
-    secondary="$(format_remaining_number "$(read_usage_value "$file" secondary_used_percent)")"
+    primary_used="$(read_usage_value "$file" primary_used_percent)"
+    secondary_used="$(read_usage_value "$file" secondary_used_percent)"
+    if ! is_percent "$primary_used" || ! is_percent "$secondary_used"; then
+        printf -- '-\n'
+        return 0
+    fi
+
+    primary="$(format_remaining_number "$primary_used")"
+    secondary="$(format_remaining_number "$secondary_used")"
     primary_reset="$(format_reset_short "$(read_usage_value "$file" primary_reset_at)")"
     secondary_reset="$(format_reset_short "$(read_usage_value "$file" secondary_reset_at)")"
     label="5h ${primary}% left @${primary_reset} | W ${secondary}% left @${secondary_reset}"
@@ -666,6 +680,12 @@ limit_status() {
 
     reset_at="$(read_limit_value "$file" reset_at)"
     now="$(now_epoch)"
+
+    if [ -n "$reset_at" ] && ! [ "$reset_at" -eq "$reset_at" ] 2>/dev/null; then
+        rm -f "$file"
+        printf -- '-\n'
+        return 0
+    fi
 
     if [ -n "$reset_at" ] && [ "$reset_at" -eq "$reset_at" ] 2>/dev/null && [ "$now" -ge "$reset_at" ]; then
         rm -f "$file"
@@ -768,13 +788,13 @@ parse_rate_limits_with_jq() {
         select(.type == "event_msg") |
         (.rate_limits // .payload.rate_limits // empty) |
         [
-            (.rate_limit_reached_type // ""),
+            (if ((.rate_limit_reached_type // "") == "") then "" else .rate_limit_reached_type end),
             (.primary.used_percent // 0),
-            (.primary.resets_at // ""),
+            (.primary.resets_at // .primary.reset_at // ""),
             (.secondary.used_percent // 0),
-            (.secondary.resets_at // ""),
+            (.secondary.resets_at // .secondary.reset_at // ""),
             (.plan_type // "")
-        ] | @tsv
+        ] | join("\u001f")
     ' "$file" 2>/dev/null | sed -n '$p'
 }
 
@@ -788,11 +808,13 @@ parse_rate_limits_fallback() {
     [ "$reached" = "null" ] && reached=""
     primary_used="$(printf '%s\n' "$line" | sed -n 's/.*"primary":{[^}]*"used_percent":\([0-9.]*\).*/\1/p')"
     primary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"primary":{[^}]*"resets_at":\([0-9]*\).*/\1/p')"
+    [ -n "$primary_reset" ] || primary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"primary":{[^}]*"reset_at":\([0-9]*\).*/\1/p')"
     secondary_used="$(printf '%s\n' "$line" | sed -n 's/.*"secondary":{[^}]*"used_percent":\([0-9.]*\).*/\1/p')"
     secondary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"secondary":{[^}]*"resets_at":\([0-9]*\).*/\1/p')"
+    [ -n "$secondary_reset" ] || secondary_reset="$(printf '%s\n' "$line" | sed -n 's/.*"secondary":{[^}]*"reset_at":\([0-9]*\).*/\1/p')"
     plan="$(printf '%s\n' "$line" | sed -n 's/.*"plan_type":"\([^"]*\)".*/\1/p')"
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${reached:-}" "${primary_used:-0}" "${primary_reset:-}" "${secondary_used:-0}" "${secondary_reset:-}" "${plan:-}"
+    printf '%s\037%s\037%s\037%s\037%s\037%s\n' "${reached:-}" "${primary_used:-0}" "${primary_reset:-}" "${secondary_used:-0}" "${secondary_reset:-}" "${plan:-}"
 }
 
 scan_limit_for_profile() {
@@ -801,6 +823,7 @@ scan_limit_for_profile() {
     local after_epoch="${3:-}"
     local session record reached primary_used primary_reset secondary_used secondary_reset plan
     local hit_type="" reset_at=""
+    local field_sep
 
     session="$(latest_session_file "$home" "$after_epoch" || true)"
     [ -n "$session" ] || return 0
@@ -808,7 +831,8 @@ scan_limit_for_profile() {
     record="$(parse_rate_limits_with_jq "$session" || parse_rate_limits_fallback "$session" || true)"
     [ -n "$record" ] || return 0
 
-    IFS=$'\t' read -r reached primary_used primary_reset secondary_used secondary_reset plan <<< "$record"
+    field_sep="$(printf '\037')"
+    IFS="$field_sep" read -r reached primary_used primary_reset secondary_used secondary_reset plan <<< "$record"
     if [ -z "$primary_reset" ] || [ "$primary_reset" -le "$(now_epoch)" ] 2>/dev/null; then
         return 0
     fi
