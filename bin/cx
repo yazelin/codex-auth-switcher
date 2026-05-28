@@ -716,11 +716,13 @@ clear_limit_if_present() {
 
 latest_session_file() {
     local home="${1:-$CX_CODEX_HOME}"
+    local after_epoch="${2:-}"
     local dir="$home/sessions"
     [ -d "$dir" ] || return 1
 
     local latest
     latest="$(find "$dir" -type f -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null |
+        awk -v after="$after_epoch" 'after == "" || $1 > after { print }' |
         sort -nr |
         sed -n '1s/^[^ ]* //p')"
     if [ -n "$latest" ]; then
@@ -728,7 +730,18 @@ latest_session_file() {
         return 0
     fi
 
-    find "$dir" -type f -name '*.jsonl' -exec ls -t {} + 2>/dev/null | sed -n '1p'
+    find "$dir" -type f -name '*.jsonl' -exec ls -t {} + 2>/dev/null |
+        while IFS= read -r file; do
+            if [ -z "$after_epoch" ] || [ "$(file_mtime_epoch "$file")" -gt "$after_epoch" ] 2>/dev/null; then
+                printf '%s\n' "$file"
+                break
+            fi
+        done
+}
+
+file_mtime_epoch() {
+    local file="$1"
+    stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null
 }
 
 ge_number() {
@@ -785,16 +798,20 @@ parse_rate_limits_fallback() {
 scan_limit_for_profile() {
     local name="$1"
     local home="${2:-$CX_CODEX_HOME}"
+    local after_epoch="${3:-}"
     local session record reached primary_used primary_reset secondary_used secondary_reset plan
     local hit_type="" reset_at=""
 
-    session="$(latest_session_file "$home" || true)"
+    session="$(latest_session_file "$home" "$after_epoch" || true)"
     [ -n "$session" ] || return 0
 
     record="$(parse_rate_limits_with_jq "$session" || parse_rate_limits_fallback "$session" || true)"
     [ -n "$record" ] || return 0
 
     IFS=$'\t' read -r reached primary_used primary_reset secondary_used secondary_reset plan <<< "$record"
+    if [ -z "$primary_reset" ] || [ "$primary_reset" -le "$(now_epoch)" ] 2>/dev/null; then
+        return 0
+    fi
     write_usage_cache "$name" "$plan" "$primary_used" "$primary_reset" "" "$secondary_used" "$secondary_reset" "" "$reached" "session-scan"
 
     case "$reached" in
@@ -1207,13 +1224,14 @@ cmd_run() {
     fi
 
     ensure_dirs
-    local name codex_bin status
+    local name codex_bin status run_start
     name="$(require_current_profile)"
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
 
     save_active_auth_if_known
     stage_profile_auth "$name"
     codex_bin="$(find_codex_bin)"
+    run_start="$(now_epoch)"
 
     set +e
     CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" "$@"
@@ -1221,7 +1239,9 @@ cmd_run() {
     set -e
 
     store_profile_auth "$name"
-    scan_limit_for_profile "$name" "$CX_CODEX_HOME" || true
+    if [ -z "$(active_codex_processes || true)" ]; then
+        scan_limit_for_profile "$name" "$CX_CODEX_HOME" "$run_start" || true
+    fi
     return "$status"
 }
 
