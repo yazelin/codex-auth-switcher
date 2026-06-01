@@ -1,51 +1,53 @@
 # Codex Auth Switcher
 
-Manage multiple Codex ChatGPT auth profiles on one machine.  
-Switch accounts instantly without re-logging in. Works on **Windows**, **Linux**, and **macOS**.
+**繁體中文** · [English](README.en.md) · [日本語](README.ja.md)
 
-**[Full guide → yazelin.github.io/codex-auth-switcher](https://yazelin.github.io/codex-auth-switcher/)**
+在同一台機器上管理多個 Codex ChatGPT auth profile。  
+無需重新登入即可瞬間切換帳號，支援 **Windows**、**Linux** 及 **macOS**。
 
-## Quick Install
+**[完整使用指南 → yazelin.github.io/codex-auth-switcher](https://yazelin.github.io/codex-auth-switcher/)**
 
-**Windows PowerShell** — open any PowerShell window and paste:
+## 快速安裝
+
+**Windows PowerShell** — 開啟任意 PowerShell 視窗並貼上：
 
 ```powershell
 irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex
 ```
 
-**Linux / macOS** — open any bash or zsh terminal and paste:
+**Linux / macOS** — 開啟任意 bash 或 zsh 終端機並貼上：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.sh)
 ```
 
-The installer clones the repo, wires up your shell profile, and prints a first-time setup guide.
+安裝程式會 clone 此 repo、設定好 shell profile，並印出初次設定說明。
 
 ---
 
-Small shell tooling for managing multiple Codex ChatGPT auth identities on one computer while keeping your normal Codex configuration shared.
+這是一組小型 shell 工具，用於在同一台電腦上管理多個 Codex ChatGPT auth 身份，同時保留共用的 Codex 設定。
 
-The design intentionally shares the Codex configuration and reusable local resources:
+設計上刻意共用 Codex 設定與可重複使用的本機資源：
 
 - `~/.codex/config.toml`
 - `~/.codex/hooks.json`
-- plugins, skills, memories, and other state
+- plugins、skills、memories 及其他狀態
 
-Only `~/.codex/auth.json` is switched between named auth profiles.
-Wrapped `codex` runs use the normal Codex home, so multiple sessions on the same active account share `/resume`, session history, sqlite state, skills, and plugins. Account switching is guarded while Codex is active to avoid changing `auth.json` under a running session.
+只有 `~/.codex/auth.json` 會在各具名 auth profile 之間切換。  
+透過包裝執行的 `codex` 使用正常的 Codex home，因此同一個使用中帳號的多個 session 共享 `/resume`、session history、sqlite 狀態、skills 及 plugins。切換帳號時若 Codex 正在執行，系統會阻擋操作，避免在執行中的 session 底下替換 `auth.json`。
 
-## Platform Support
+## 平台支援
 
-This repo supports:
+此 repo 支援：
 
-- Linux and macOS through bash
-- Windows through PowerShell
+- Linux 與 macOS（透過 bash）
+- Windows（透過 PowerShell）
 
-The behavior and storage format are the same on both platforms. Windows uses PowerShell scripts instead of bash wrappers.
+兩個平台的行為與儲存格式完全相同，Windows 使用 PowerShell 腳本取代 bash wrapper。
 
-## Layout
+## 目錄結構
 
-Shared Codex state stays where Codex already expects it:
+共用的 Codex 狀態維持在 Codex 原本預期的位置：
 
 ```text
 ~/.codex/
@@ -57,9 +59,9 @@ Shared Codex state stays where Codex already expects it:
   logs_*.sqlite    # direct Codex logs
 ```
 
-Stored auth profiles live separately.
+已儲存的 auth profile 則放在獨立的位置。
 
-Linux/macOS:
+Linux/macOS：
 
 ```text
 ~/.codex_auth_profiles/
@@ -78,7 +80,7 @@ Linux/macOS:
     .limit
 ```
 
-Windows:
+Windows：
 
 ```text
 %USERPROFILE%\.codex_auth_profiles\
@@ -97,88 +99,88 @@ Windows:
     .limit
 ```
 
-Profile names are arbitrary. `work`, `personal`, `team-a`, `backup`, or a teammate name are all just labels.
+Profile 名稱可自由命名，`work`、`personal`、`team-a`、`backup` 或同事名稱都只是標籤。
 
-## Install
+## 安裝
 
-See **[Quick Install](#quick-install)** above for the one-liner commands.
+請參閱上方的**[快速安裝](#快速安裝)**取得一行指令。
 
-### Manual Install — Linux / macOS
+### 手動安裝 — Linux / macOS
 
-Clone this repo, then run from the repo root:
+Clone 此 repo，然後在 repo 根目錄執行：
 
 ```bash
 ./install.sh
 ```
 
-Add the printed source line to `~/.bashrc`, usually:
+將印出的 source 指令加入 `~/.bashrc`，通常如下：
 
 ```bash
 source "$HOME/.config/codex-auth-switcher/bash.sh"
 ```
 
-Reload your shell:
+重新載入 shell：
 
 ```bash
 source ~/.bashrc
 ```
 
-### Manual Install — Windows PowerShell
+### 手動安裝 — Windows PowerShell
 
-Clone this repo, then run the installer to append the source line to your profile:
+Clone 此 repo，然後執行安裝程式，將 source 指令附加至 profile：
 
 ```powershell
 .\install.ps1 -UpdateProfile
 ```
 
-Then reload the profile:
+重新載入 profile：
 
 ```powershell
 . $PROFILE
 ```
 
-Both shell integrations give you:
+兩種 shell 整合都會提供：
 
-- `cx`: profile manager
-- `codex`: shell function wrapper that runs Codex through `cx`
+- `cx`：profile 管理工具
+- `codex`：透過 `cx` 執行 Codex 的 shell function wrapper
 
-The wrapper is required because it launches Codex with the selected profile auth in an isolated temporary `CODEX_HOME`, then saves any refreshed token back after Codex exits.
+此 wrapper 是必要的，因為它會在隔離的暫存 `CODEX_HOME` 中，以選定 profile 的 auth 啟動 Codex，並在 Codex 結束後將任何已刷新的 token 存回。
 
-## First-Time Setup
+## 初次設定
 
-If the current machine already has a logged-in Codex account:
+若目前機器上已有登入的 Codex 帳號：
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 cx import main
 cx list
 ```
 
-Windows:
+Windows：
 
 ```powershell
 cx import main
 cx list
 ```
 
-To add another auth profile:
+新增另一個 auth profile：
 
 ```bash
 cx login team-a
 cx login coworker-1
 ```
 
-To choose which auth Codex should use:
+選擇 Codex 要使用的 auth：
 
 ```bash
 cx use team-a
 codex
 ```
 
-## Daily Commands
+## 日常指令
 
-Linux/macOS and Windows use the same commands:
+Linux/macOS 與 Windows 使用相同的指令：
 
 ```bash
 cx switch               # interactive profile switcher — kills Codex first
@@ -200,7 +202,7 @@ cx ok <name>
 codex
 ```
 
-`cx list` shows:
+`cx list` 顯示內容如下：
 
 ```text
 CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       USAGE                            LIMIT
@@ -209,17 +211,17 @@ CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN  
          coworker-1               not-login  -                            -          -                                -
 ```
 
-`LOGIN` is based on whether that profile has a saved `auth.json`. `EMAIL` and `PLAN` are parsed from the ChatGPT `id_token` when available. `USAGE` shows cached remaining 5-hour and weekly quota; `@` is the local reset time and the final age is when the cache was refreshed. Email and account IDs are masked for terminal display.
+`LOGIN` 欄位依據該 profile 是否有已儲存的 `auth.json` 來判斷。`EMAIL` 與 `PLAN` 是在有效時從 ChatGPT `id_token` 解析而來。`USAGE` 顯示快取的 5 小時及每週配額剩餘量；`@` 後為本地重置時間，最後的時間戳為快取更新時間。Email 與帳號 ID 在終端機顯示時會遮罩處理。
 
-Use `cx usage` or `cx list --live` when you want fresh usage. Live refresh sends each selected profile's ChatGPT access token to `https://chatgpt.com/backend-api/wham/usage`, then stores the result in:
+需要即時用量時請使用 `cx usage` 或 `cx list --live`。即時刷新會將各選定 profile 的 ChatGPT access token 送至 `https://chatgpt.com/backend-api/wham/usage`，並將結果儲存至：
 
 ```text
 ~/.codex_auth_profiles/<name>/.usage
 ```
 
-Plain `cx list` and `cx switch` do not call the network; they display the latest cached `.usage` value if one exists.
+直接執行 `cx list` 與 `cx switch` 不會呼叫網路，只會顯示最新快取的 `.usage` 值（若存在）。
 
-`cx info <name>` shows one profile in key-value form:
+`cx info <name>` 以 key-value 形式顯示單一 profile：
 
 ```text
 profile=main
@@ -237,22 +239,22 @@ limit=-
 profile_dir=/home/me/.codex_auth_profiles/main
 ```
 
-`cx remove <name>` deletes a saved auth profile directory:
+`cx remove <name>` 刪除已儲存的 auth profile 目錄：
 
 ```bash
 cx remove old-profile
 ```
 
-For safety, it refuses to remove the currently active profile. Switch to another profile first:
+為安全起見，無法移除當前使用中的 profile，請先切換至其他 profile：
 
 ```bash
 cx use main
 cx remove old-profile
 ```
 
-## Limit Tracking
+## 用量限制追蹤
 
-Codex session JSONL files can include `rate_limits` data:
+Codex session 的 JSONL 檔可包含 `rate_limits` 資料：
 
 ```json
 {
@@ -264,13 +266,13 @@ Codex session JSONL files can include `rate_limits` data:
 }
 ```
 
-After each wrapped `codex` run, `cx` scans that run's session file. If usage data is present, it updates the cached `.usage` snapshot. If a rate limit was reached, it writes:
+每次透過 wrapper 執行 `codex` 結束後，`cx` 會掃描該次執行的 session 檔。若有用量資料，會更新快取的 `.usage` 快照。若觸達 rate limit，則寫入：
 
 ```text
 ~/.codex_auth_profiles/<name>/.limit
 ```
 
-The marker stores:
+此標記檔儲存：
 
 ```text
 hit_at=1779694300
@@ -280,34 +282,34 @@ source=session-scan
 label=hit until 2026-05-25 17:06
 ```
 
-`cx list` automatically clears `.limit` when `now >= reset_at`, so a profile becomes available again the next time you list profiles.
+`cx list` 在 `now >= reset_at` 時會自動清除 `.limit`，讓 profile 在下次列出時恢復可用。
 
-If reset time cannot be detected, the status stays `hit unknown` until you clear it manually:
+若無法偵測到重置時間，狀態會維持 `hit unknown`，直到手動清除：
 
 ```bash
 cx ok <name>
 ```
 
-Manual marking is also supported:
+也支援手動標記：
 
 ```bash
 cx limit <name>
 cx limit <name> <reset_epoch>
 ```
 
-## Optional Stop Hook
+## 選用的 Stop Hook
 
-The `codex` wrapper already scans limits after Codex exits. The optional hook catches normal Codex `Stop` events earlier.
+`codex` wrapper 在 Codex 結束後已會掃描限制狀態。選用的 hook 可更早捕捉 Codex 的正常 `Stop` 事件。
 
 ### Linux / macOS Hook
 
-Print the hook command:
+印出 hook 指令：
 
 ```bash
 cx hook-command
 ```
 
-Add it to the `Stop` section of `~/.codex/hooks.json`:
+將其加入 `~/.codex/hooks.json` 的 `Stop` 區塊：
 
 ```json
 {
@@ -326,23 +328,23 @@ Add it to the `Stop` section of `~/.codex/hooks.json`:
 }
 ```
 
-If you already have other `Stop` hooks, add this as another command entry. Do not remove existing hooks unless you intentionally want to.
+若已有其他 `Stop` hook，將此項新增為另一個 command entry，除非刻意要移除否則請保留現有 hook。
 
 ### Windows Hook
 
-Print the hook command:
+印出 hook 指令：
 
 ```powershell
 cx hook-command
 ```
 
-It will look like:
+輸出格式如下：
 
 ```text
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\codex-auth-switcher\hooks\codex-limit-hook.ps1"
 ```
 
-Add that command to the `Stop` section of `%USERPROFILE%\.codex\hooks.json`:
+將該指令加入 `%USERPROFILE%\.codex\hooks.json` 的 `Stop` 區塊：
 
 ```json
 {
@@ -361,70 +363,70 @@ Add that command to the `Stop` section of `%USERPROFILE%\.codex\hooks.json`:
 }
 ```
 
-## Concurrency
+## 並行執行
 
-Wrapped `codex` runs use the shared Codex home. Multiple sessions on the same active profile can run at the same time and see the same `/resume` history.
+透過 wrapper 執行的 `codex` 使用共用的 Codex home。同一個使用中 profile 的多個 session 可同時執行，並看到相同的 `/resume` history。
 
-That means you can open two or three Codex sessions at the same time when they use the same active profile.
+也就是說，當使用同一個使用中 profile 時，可以同時開啟兩個或三個 Codex session。
 
-`cx use` and `cx login` check for other active Codex processes before changing `~/.codex/auth.json`. `cx switch` intentionally kills active Codex processes before switching the shared active profile.
+`cx use` 與 `cx login` 在變更 `~/.codex/auth.json` 前會檢查是否有其他 Codex 程序正在執行。`cx switch` 則刻意在切換共用的使用中 profile 前先終止所有 Codex 程序。
 
 ```bash
 cx ps
 cx doctor
 ```
 
-`cx ps` lists detected Codex processes as `active` or `background`. `active` processes block login by default and are killed by `cx switch`. `background` processes such as app-server or IDE helper processes are shown but do not block.
+`cx ps` 列出偵測到的 Codex 程序，標記為 `active` 或 `background`。`active` 程序預設會阻擋登入，並在 `cx switch` 時被終止。`background` 程序（如 app-server 或 IDE 輔助程序）會顯示但不阻擋操作。
 
-To override the process guard:
+若要略過程序保護：
 
 ```bash
 CX_ALLOW_ACTIVE_CODEX=1 cx login <name>
 ```
 
-PowerShell — set the variable then run the command on the same line with `;`:
+PowerShell — 用 `;` 在同一行設定變數並執行指令：
 
 ```powershell
 $env:CX_ALLOW_ACTIVE_CODEX = "1"; cx login <name>
 ```
 
-Or across two lines if you prefer:
+或分兩行：
 
 ```powershell
 $env:CX_ALLOW_ACTIVE_CODEX = "1"
 cx login <name>
 ```
 
-> **PowerShell 5.1 pitfalls** — the following bash-style patterns do not work and will error:
-> - `CX_ALLOW_ACTIVE_CODEX=1 cx login <name>` — inline env prefix is not valid PowerShell syntax
-> - `set CX_ALLOW_ACTIVE_CODEX=1 && cx login <name>` — `&&` is not supported in PowerShell 5.1
-> - `set CX_ALLOW_ACTIVE_CODEX=1 | cx login <name>` — `set` (`Set-Variable`) piped to a command does nothing useful
+> **PowerShell 5.1 注意事項** — 以下 bash 風格的寫法在 PowerShell 中無效，會產生錯誤：
+> - `CX_ALLOW_ACTIVE_CODEX=1 cx login <name>` — inline 環境變數前綴不是合法的 PowerShell 語法
+> - `set CX_ALLOW_ACTIVE_CODEX=1 && cx login <name>` — PowerShell 5.1 不支援 `&&`
+> - `set CX_ALLOW_ACTIVE_CODEX=1 | cx login <name>` — `set`（`Set-Variable`）pipe 至指令沒有實際效果
 >
-> Always use `$env:VAR = "value"; command` in PowerShell.
+> 在 PowerShell 中請一律使用 `$env:VAR = "value"; command`。
 
-## Export And Restore
+## 匯出與還原
 
-Profiles can be copied to another machine as a tar.gz archive:
+Profile 可打包為 tar.gz 壓縮檔複製至另一台機器：
 
 ```bash
 cx export profiles.tgz
 cx restore profiles.tgz
 ```
 
-PowerShell uses the same commands:
+PowerShell 使用相同指令：
 
 ```powershell
 cx export profiles.tgz
 cx restore profiles.tgz
 ```
 
-The archive contains auth tokens. Keep it private and delete it when you are done moving profiles.
+壓縮檔包含 auth token，請妥善保管並在完成 profile 搬移後刪除。
 
-## Environment
+## 環境變數
 
-Defaults:
+預設值：
 
-Linux/macOS:
+Linux/macOS：
 
 ```bash
 CX_PROFILES_DIR="$HOME/.codex_auth_profiles"
@@ -432,7 +434,7 @@ CX_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CX_LIMIT_THRESHOLD=100
 ```
 
-Windows PowerShell:
+Windows PowerShell：
 
 ```powershell
 $env:CX_PROFILES_DIR = "$HOME\.codex_auth_profiles"
@@ -440,50 +442,50 @@ $env:CX_CODEX_HOME = "$HOME\.codex"
 $env:CX_LIMIT_THRESHOLD = "100"
 ```
 
-Override the real Codex binary if needed:
+若需要指定特定的 Codex 執行檔：
 
 ```bash
 export CX_CODEX_BIN="/path/to/codex"
 ```
 
-Windows:
+Windows：
 
 ```powershell
 $env:CX_CODEX_BIN = "C:\path\to\codex.cmd"
 ```
 
-Use a non-default shared Codex home:
+使用非預設的共用 Codex home：
 
 ```bash
 export CX_CODEX_HOME="$HOME/.codex"
 ```
 
-Windows:
+Windows：
 
 ```powershell
 $env:CX_CODEX_HOME = "$HOME\.codex"
 ```
 
-Allow login while active Codex processes are detected:
+允許在偵測到 Codex 程序時仍可登入：
 
 ```bash
 export CX_ALLOW_ACTIVE_CODEX=1
 ```
 
-Windows:
+Windows：
 
 ```powershell
 $env:CX_ALLOW_ACTIVE_CODEX = "1"
 ```
 
-## Safety Notes
+## 安全注意事項
 
-This tool does not automatically switch to another account after a limit is reached. It records which profile appears limited and when it should reset, then lets you choose the next profile with `cx use <name>`.
+此工具不會在達到限制後自動切換至其他帳號。它只記錄哪個 profile 看起來受到限制以及預計重置時間，讓你用 `cx use <name>` 自行選擇下一個 profile。
 
-Auth profiles contain tokens. Do not commit `~/.codex_auth_profiles` or any `auth.json` file.
+Auth profile 包含 token，請勿 commit `~/.codex_auth_profiles` 或任何 `auth.json` 檔案。
 
-Live usage refresh is opt-in. `cx usage`, `cx list --live`, and `cx switch --live` call a ChatGPT backend endpoint with the selected profile tokens; plain `cx list` and `cx switch` only read local cache.
+即時用量刷新為選用功能。`cx usage`、`cx list --live` 及 `cx switch --live` 會以選定 profile 的 token 呼叫 ChatGPT 後端 endpoint；直接執行 `cx list` 與 `cx switch` 只讀取本地快取。
 
-## Prior Art
+## 相關先行作品
 
-See [docs/prior-art.md](docs/prior-art.md) for notes comparing this small wrapper with `Lampese/codex-switcher`.
+比較此 wrapper 與 `Lampese/codex-switcher` 的說明請參閱 [docs/prior-art.md](docs/prior-art.md)。
