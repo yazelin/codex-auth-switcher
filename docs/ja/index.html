@@ -347,6 +347,35 @@
   footer a:hover { text-decoration: underline; }
 
   /* ── Responsive ── */
+  /* How it works — swap table */
+  .how-section { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .swap-table {
+    width: 100%; border-collapse: collapse; font-size: .9rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .swap-table th {
+    text-align: left; padding: .8rem 1.1rem; background: var(--code-bg);
+    color: var(--text-dim); font-size: .75rem; font-weight: 700;
+    letter-spacing: .05em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .swap-table td { padding: .8rem 1.1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .swap-table tr:last-child td { border-bottom: none; }
+  .swap-table code {
+    font-family: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    font-size: .8rem; color: #79c0ff; background: rgba(121,192,255,.1);
+    padding: .15rem .4rem; border-radius: 4px;
+  }
+  .pill-shared { color: var(--green); font-weight: 700; }
+  .pill-switched { color: var(--blue-light); font-weight: 700; }
+  .how-note {
+    background: var(--surface); border-left: 3px solid var(--blue);
+    padding: .9rem 1.1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: .875rem; color: var(--text); margin-top: 1.5rem; line-height: 1.7;
+  }
+  .how-note strong { color: var(--blue-light); }
+
   @media (max-width: 700px) {
     nav { padding: 0 1rem; }
     .nav-links { gap: .75rem; }
@@ -369,10 +398,10 @@
     .step-body h4 { font-size: .95rem; }
     .step-body p { font-size: .83rem; }
     .demo-body { font-size: .72rem; padding: 1rem; }
-    .cmd-table { font-size: .82rem; }
+    .cmd-table, .swap-table { font-size: .82rem; }
     .cmd-table td, .cmd-table th { padding: .6rem .75rem; }
     .container { padding: 0 1rem; }
-    .features, .steps-section, .commands-section, .faq-section { padding: 3rem 0; }
+    .how-section, .features, .steps-section, .commands-section, .faq-section { padding: 3rem 0; }
     .section-title { margin-bottom: 1.75rem; }
   }
 </style>
@@ -384,6 +413,7 @@
   <a class="nav-brand" href="#"><span>Codex</span> Auth Switcher</a>
   <div class="nav-links">
     <a href="#install">インストール</a>
+    <a href="#how">仕組み</a>
     <a href="#commands">コマンド</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/yazelin/codex-auth-switcher" target="_blank">GitHub</a>
@@ -460,6 +490,30 @@
         <h3>設定と履歴を完全共有</h3>
         <p>config・hooks・セッション履歴はすべて共有。切り替わるのはAuthトークンのみで、他には影響しません。</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="how-section" id="how">
+  <div class="container">
+    <div class="section-label">動作原理</div>
+    <div class="section-title">切り替え時、実際に何が入れ替わるのか？</div>
+    <div style="overflow-x:auto">
+    <table class="swap-table">
+      <thead>
+        <tr><th>項目</th><th>場所</th><th>切替 / 共有</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>アカウントの auth token</td><td><code>~/.codex/auth.json</code></td><td><span class="pill-switched">プロファイルごとに切替</span></td></tr>
+        <tr><td>設定・hooks</td><td><code>~/.codex/config.toml</code>、<code>hooks.json</code></td><td><span class="pill-shared">共有</span></td></tr>
+        <tr><td>セッション・<code>/resume</code> 履歴・sqlite 状態</td><td><code>~/.codex/</code></td><td><span class="pill-shared">共有</span></td></tr>
+        <tr><td>skills・plugins</td><td><code>~/.codex/</code></td><td><span class="pill-shared">共有</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="how-note">
+      切り替わるのは <code>auth.json</code>（アカウントの token）だけで、それ以外はすべて共有です。<code>codex</code> ラッパー経由で起動すると通常の <code>~/.codex</code> が使われるため、会話・<code>/resume</code>・設定はアカウント間で共有されます。<br>
+      <strong>アカウントの追加は安全です</strong>：<code>cx login</code> は隔離した一時ホームでログインし、保存済みの他アカウントには一切触れません。そのため複数アカウント（同一 ChatGPT アカウント配下の複数ワークスペースを含む）が互いをログアウトさせずに共存できます。
     </div>
   </div>
 </section>

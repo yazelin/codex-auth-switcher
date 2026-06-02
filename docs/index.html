@@ -347,6 +347,35 @@
   footer a:hover { text-decoration: underline; }
 
   /* ── Responsive ── */
+  /* How it works — swap table */
+  .how-section { padding: 4rem 0; border-top: 1px solid var(--border); }
+  .swap-table {
+    width: 100%; border-collapse: collapse; font-size: .9rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .swap-table th {
+    text-align: left; padding: .8rem 1.1rem; background: var(--code-bg);
+    color: var(--text-dim); font-size: .75rem; font-weight: 700;
+    letter-spacing: .05em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .swap-table td { padding: .8rem 1.1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .swap-table tr:last-child td { border-bottom: none; }
+  .swap-table code {
+    font-family: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    font-size: .8rem; color: #79c0ff; background: rgba(121,192,255,.1);
+    padding: .15rem .4rem; border-radius: 4px;
+  }
+  .pill-shared { color: var(--green); font-weight: 700; }
+  .pill-switched { color: var(--blue-light); font-weight: 700; }
+  .how-note {
+    background: var(--surface); border-left: 3px solid var(--blue);
+    padding: .9rem 1.1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: .875rem; color: var(--text); margin-top: 1.5rem; line-height: 1.7;
+  }
+  .how-note strong { color: var(--blue-light); }
+
   @media (max-width: 700px) {
     nav { padding: 0 1rem; }
     .nav-links { gap: .75rem; }
@@ -369,10 +398,10 @@
     .step-body h4 { font-size: .95rem; }
     .step-body p { font-size: .83rem; }
     .demo-body { font-size: .72rem; padding: 1rem; }
-    .cmd-table { font-size: .82rem; }
+    .cmd-table, .swap-table { font-size: .82rem; }
     .cmd-table td, .cmd-table th { padding: .6rem .75rem; }
     .container { padding: 0 1rem; }
-    .features, .steps-section, .commands-section, .faq-section { padding: 3rem 0; }
+    .how-section, .features, .steps-section, .commands-section, .faq-section { padding: 3rem 0; }
     .section-title { margin-bottom: 1.75rem; }
   }
 </style>
@@ -384,6 +413,7 @@
   <a class="nav-brand" href="#"><span>Codex</span> Auth Switcher</a>
   <div class="nav-links">
     <a href="#install">安裝</a>
+    <a href="#how">原理</a>
     <a href="#commands">指令</a>
     <a href="#faq">FAQ</a>
     <a href="https://github.com/yazelin/codex-auth-switcher" target="_blank">GitHub</a>
@@ -460,6 +490,30 @@
         <h3>設定與歷史完全共用</h3>
         <p>config、hooks、session 歷史通通共用，只有 auth token 會切換，其他不受影響。</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="how-section" id="how">
+  <div class="container">
+    <div class="section-label">運作原理</div>
+    <div class="section-title">切換時，到底換了什麼？</div>
+    <div style="overflow-x:auto">
+    <table class="swap-table">
+      <thead>
+        <tr><th>項目</th><th>位置</th><th>切換 / 共用</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>帳號 auth token</td><td><code>~/.codex/auth.json</code></td><td><span class="pill-switched">每個 profile 切換</span></td></tr>
+        <tr><td>設定、hooks</td><td><code>~/.codex/config.toml</code>、<code>hooks.json</code></td><td><span class="pill-shared">共用</span></td></tr>
+        <tr><td>sessions、<code>/resume</code> 歷史、sqlite 狀態</td><td><code>~/.codex/</code></td><td><span class="pill-shared">共用</span></td></tr>
+        <tr><td>skills、plugins</td><td><code>~/.codex/</code></td><td><span class="pill-shared">共用</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="how-note">
+      只有 <code>auth.json</code>（帳號 token）會切換，其餘全部共用。你透過 <code>codex</code>（wrapper）啟動時用的是一般的 <code>~/.codex</code>，所以對話、<code>/resume</code>、設定在各帳號間都共用。<br>
+      <strong>新增帳號是安全的</strong>：<code>cx login</code> 會在一個獨立的暫時環境登入，完全不碰其他已存帳號——所以多個帳號（含同一個 ChatGPT 帳號下的多個 workspace）能並存、不會互相把對方登出。
     </div>
   </div>
 </section>
