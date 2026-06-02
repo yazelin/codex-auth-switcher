@@ -92,6 +92,35 @@ function Get-ProfileAuth([string]$Name) {
     Join-Path (Get-ProfileDir $Name) "auth.json"
 }
 
+# Extract the ChatGPT workspace id (account_id) stored in a profile's auth.json.
+function Get-ProfileAccountId([string]$Name) {
+    $auth = Get-ProfileAuth $Name
+    if (-not (Test-Path -LiteralPath $auth)) { return $null }
+    try {
+        return ((Get-Content -LiteralPath $auth -Raw | ConvertFrom-Json).tokens.account_id)
+    } catch {
+        return $null
+    }
+}
+
+# Warn if another profile points at the SAME workspace (account_id). Two profiles
+# for one workspace share a single rotating refresh-token family, so keeping both
+# is what triggers OpenAI's reuse-detection revocation. Warn, don't block.
+function Warn-DuplicateAccount([string]$Name) {
+    $acc = Get-ProfileAccountId $Name
+    if ([string]::IsNullOrWhiteSpace($acc)) { return }
+    if (-not (Test-Path -LiteralPath $ProfilesDir)) { return }
+    foreach ($dir in (Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue)) {
+        $other = $dir.Name
+        if ($other -eq '.lock' -or $other -eq '.runtime' -or $other -eq $Name) { continue }
+        $oacc = Get-ProfileAccountId $other
+        if ($oacc -and ($oacc -eq $acc)) {
+            Write-Warning "cx: profile `"$other`" uses the same workspace (account_id $acc) as `"$Name`"."
+            Write-Warning "cx: one workspace = one token family; keeping both invites reuse revocation. Consider: cx remove $other"
+        }
+    }
+}
+
 function Get-CurrentProfile {
     if (Test-Path -LiteralPath $CurrentFile) {
         (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim()
@@ -780,35 +809,42 @@ function Cmd-Login([string[]]$Rest) {
     Acquire-Lock
     try {
         Assert-NoActiveCodex
-        Save-ActiveAuthIfKnown
-        $backup = $null
-        $shared = Get-SharedAuth
-        if (Test-Path -LiteralPath $shared) {
-            $backup = "$shared.cx-login-backup.$PID"
-            Copy-Item -LiteralPath $shared -Destination $backup -Force
-        }
 
-        if (Test-Path -LiteralPath (Get-ProfileAuth $name)) {
+        # Isolated login: run `codex login` against a brand-new EMPTY CODEX_HOME so
+        # codex's post-login "revoke superseded tokens" step can only touch that
+        # empty temp home, never the other profiles. The shared auth.json is not
+        # involved during login; we only harvest the freshly minted auth.json.
+        $tmpHome = Join-Path ([System.IO.Path]::GetTempPath()) ("cx-login-" + [System.IO.Path]::GetRandomFileName())
+        New-Item -ItemType Directory -Force -Path $tmpHome | Out-Null
+        try {
+            $loginCommandArgs = @("login") + $loginArgs
+            $status = Invoke-CodexWithEnv $name $loginCommandArgs $tmpHome
+            $tmpAuth = Join-Path $tmpHome "auth.json"
+            if ($status -ne 0 -or -not (Test-Path -LiteralPath $tmpAuth)) {
+                $global:LASTEXITCODE = $status
+                return
+            }
+
+            # Save the freshly minted token into the profile (only auth.json).
+            New-Item -ItemType Directory -Force -Path (Get-ProfileDir $name) | Out-Null
+            Copy-Item -LiteralPath $tmpAuth -Destination (Get-ProfileAuth $name) -Force
+
+            Warn-DuplicateAccount $name
+
+            # Activate (pure file swap, no login/revoke). Only fold the active
+            # profile's possibly-rotated shared token back when switching AWAY from
+            # a DIFFERENT profile; re-logging the CURRENT profile must keep the
+            # token we just minted instead of restoring the stale shared one.
+            $prev = Get-CurrentProfile
+            if (-not [string]::IsNullOrWhiteSpace($prev) -and $prev -ne $name) {
+                Save-ActiveAuthIfKnown
+            }
             Stage-ProfileAuth $name
-        } elseif (Test-Path -LiteralPath $shared) {
-            Remove-Item -LiteralPath $shared -Force
-        }
-
-        $loginCommandArgs = @("login") + $loginArgs
-        $status = Invoke-CodexWithEnv $name $loginCommandArgs
-        if ($status -eq 0 -and (Test-Path -LiteralPath $shared)) {
-            Store-ProfileAuth $name
             Set-CurrentProfile $name
-            if ($backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
             "current: $name"
-            return
+        } finally {
+            Remove-Item -LiteralPath $tmpHome -Recurse -Force -ErrorAction SilentlyContinue
         }
-
-        if ($backup -and (Test-Path -LiteralPath $backup)) {
-            Copy-Item -LiteralPath $backup -Destination $shared -Force
-            Remove-Item -LiteralPath $backup -Force
-        }
-        $global:LASTEXITCODE = $status
     } finally {
         Release-Lock
     }
