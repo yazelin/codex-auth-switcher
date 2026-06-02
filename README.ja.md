@@ -146,6 +146,36 @@ source ~/.bashrc
 
 このラッパーは、選択したプロファイルの認証を使って分離された一時 `CODEX_HOME` で Codex を起動し、Codex 終了後にリフレッシュされたトークンを保存するために必要です。
 
+## アンインストール
+
+シェル連携（`cx` / `codex` コマンド）を削除します。保存済みアカウントはデフォルトで残します。
+
+**Linux / macOS**
+
+```bash
+# ワンライナーはデフォルトで ~/.local/share/codex-auth-switcher にインストールされます
+bash ~/.local/share/codex-auth-switcher/uninstall.sh
+# 保存済みアカウントも削除する場合:
+bash ~/.local/share/codex-auth-switcher/uninstall.sh --purge
+```
+
+（手動インストールした場合は、クローンした repo ディレクトリで `bash uninstall.sh` を実行してください。）
+
+**Windows PowerShell**
+
+```powershell
+& "$HOME\codex-auth-switcher\uninstall.ps1"
+# 保存済みアカウントも削除する場合:
+& "$HOME\codex-auth-switcher\uninstall.ps1" -Purge
+```
+
+アンインストーラは `cx` シンボリックリンク（`~/.local/bin/cx`）、
+`~/.config/codex-auth-switcher/bash.sh`、そしてシェルプロファイル内の
+`# Codex Auth Switcher` ブロックを削除し（変更前に `.cx-bak` バックアップを作成）、
+repo 本体と `~/.codex_auth_profiles` 内の保存済みアカウントは**残します**。完了時に
+repo を手動削除するコマンドを表示します。`--purge` / `-Purge` を付けると保存済み
+アカウントも削除します。
+
 ## 初回セットアップ
 
 現在のマシンにすでにログイン済みの Codex アカウントがある場合:
