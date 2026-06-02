@@ -81,6 +81,35 @@ secure_auth_file() {
     chmod 600 "$file" 2>/dev/null || true
 }
 
+# Extract the ChatGPT workspace id (account_id) stored in a profile's auth.json.
+profile_account_id() {
+    local auth
+    auth="$(profile_auth "$1")"
+    [ -f "$auth" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    jq -r '.tokens.account_id // empty' "$auth" 2>/dev/null || true
+}
+
+# Warn if another profile points at the SAME workspace (account_id). Two profiles
+# for one workspace share a single rotating refresh-token family, so keeping both
+# is what triggers OpenAI's reuse-detection revocation. Warn, don't block.
+warn_duplicate_account() {
+    local name="$1" acc dir other oacc
+    acc="$(profile_account_id "$name")"
+    [ -n "$acc" ] || return 0
+    for dir in "$CX_PROFILES_DIR"/*/; do
+        [ -d "$dir" ] || continue
+        other="$(basename "$dir")"
+        case "$other" in .lock|.runtime) continue ;; esac
+        [ "$other" = "$name" ] && continue
+        oacc="$(profile_account_id "$other")"
+        if [ -n "$oacc" ] && [ "$oacc" = "$acc" ]; then
+            printf 'cx: warning: profile "%s" uses the same workspace (account_id %s) as "%s".\n' "$other" "$acc" "$name" >&2
+            printf 'cx:          one workspace = one token family; keeping both invites reuse revocation. Consider: cx remove %s\n' "$other" >&2
+        fi
+    done
+}
+
 current_profile() {
     if [ -f "$current_file" ]; then
         sed -n '1p' "$current_file"
@@ -895,40 +924,54 @@ cmd_login() {
     ensure_dirs
     acquire_lock
     assert_no_active_codex "login"
-    save_active_auth_if_known
 
-    local backup=""
-    if [ -f "$(shared_auth)" ]; then
-        backup="$(shared_auth).cx-login-backup.$$"
-        cp "$(shared_auth)" "$backup"
-    fi
-
-    if [ -f "$(profile_auth "$name")" ]; then
-        stage_profile_auth "$name"
-    else
-        rm -f "$(shared_auth)"
-    fi
-
-    local codex_bin status
+    local codex_bin status tmp_home prev
     codex_bin="$(find_codex_bin)"
+
+    # Isolated login: run `codex login` against a brand-new EMPTY CODEX_HOME.
+    # Codex revokes "superseded" auth tokens only within its own CODEX_HOME on a
+    # successful login; pointing it at an empty temp dir means there is nothing to
+    # revoke, so logging in (or re-logging) one account NEVER kills the tokens of
+    # the other profiles. This is the core fix for cross-account/-workspace
+    # revocation cascades. The shared ~/.codex/auth.json is not touched here.
+    tmp_home="$(mktemp -d "${TMPDIR:-/tmp}/cx-login.XXXXXX")" || die "failed to create temp CODEX_HOME"
+    # The temp home holds a live token until harvested; wipe it on any exit or
+    # interrupt. Bake the path into the trap now and still call release_lock so we
+    # don't clobber the lock-cleanup trap acquire_lock installed.
+    trap "rm -rf '$tmp_home' 2>/dev/null; release_lock" EXIT INT TERM
+
     set +e
-    CODEX_HOME="$CX_CODEX_HOME" CODEX_AUTH_PROFILE="$name" "$codex_bin" login "$@"
+    CODEX_HOME="$tmp_home" CODEX_AUTH_PROFILE="$name" "$codex_bin" login "$@"
     status=$?
     set -e
 
-    if [ "$status" -eq 0 ] && [ -f "$(shared_auth)" ]; then
-        store_profile_auth "$name"
-        set_current_profile "$name"
-        rm -f "$backup"
-        printf 'current: %s\n' "$name"
-        return 0
+    if [ "$status" -ne 0 ] || [ ! -f "$tmp_home/auth.json" ]; then
+        rm -rf "$tmp_home"
+        return "$status"
     fi
 
-    if [ -n "$backup" ] && [ -f "$backup" ]; then
-        cp "$backup" "$(shared_auth)"
-        rm -f "$backup"
+    # Save the freshly minted token into the profile (only auth.json is harvested).
+    mkdir -p "$(profile_dir "$name")"
+    cp "$tmp_home/auth.json" "$(profile_auth "$name")"
+    secure_auth_file "$(profile_auth "$name")"
+    rm -rf "$tmp_home"
+
+    warn_duplicate_account "$name"
+
+    # Activate the profile. This is a pure file swap (no login, no revoke).
+    # Only fold the active profile's possibly-rotated shared token back when we
+    # are switching AWAY from a DIFFERENT profile. When re-logging the CURRENT
+    # profile (the recovery case: its token expired), the shared auth.json still
+    # holds the stale token, so saving it back would clobber the one we just
+    # minted — skip it in that case.
+    prev="$(current_profile)"
+    if [ -n "$prev" ] && [ "$prev" != "$name" ]; then
+        save_active_auth_if_known
     fi
-    return "$status"
+    stage_profile_auth "$name"
+    set_current_profile "$name"
+    printf 'current: %s\n' "$name"
+    return 0
 }
 
 cmd_use() {
