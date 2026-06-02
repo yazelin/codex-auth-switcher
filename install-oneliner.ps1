@@ -10,8 +10,8 @@ $InstallDir = Join-Path $HOME "codex-auth-switcher"
 
 Write-Host ""
 Write-Host "  Codex Auth Switcher" -ForegroundColor Cyan -NoNewline
-Write-Host "  —  Windows Installer" -ForegroundColor DarkGray
-Write-Host "  ──────────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host "  --  Windows Installer" -ForegroundColor DarkGray
+Write-Host "  ----------------------------------------------" -ForegroundColor DarkGray
 Write-Host ""
 
 # ── 1. Clone or update ──────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 
 $alreadySet = (Test-Path $PROFILE) -and ((Get-Content $PROFILE -Raw) -like "*$shellScript*")
 if ($alreadySet) {
-    Write-Host "  Profile already configured — skipping." -ForegroundColor Green
+    Write-Host "  Profile already configured -- skipping." -ForegroundColor Green
 } else {
     Add-Content -Path $PROFILE -Value ""
     Add-Content -Path $PROFILE -Value "# Codex Auth Switcher"
@@ -45,7 +45,7 @@ if ($alreadySet) {
 Write-Host "  cx and codex are ready in this session." -ForegroundColor Green
 
 # ── 4. Post-install guide ───────────────────────────────────────────────────
-$div = "  ──────────────────────────────────────────────"
+$div = "  ----------------------------------------------"
 Write-Host ""
 Write-Host $div -ForegroundColor DarkGray
 Write-Host "  Install complete!  Next steps:" -ForegroundColor Cyan
