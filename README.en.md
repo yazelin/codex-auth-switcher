@@ -146,6 +146,36 @@ Both shell integrations give you:
 
 The wrapper is required because it launches Codex with the selected profile auth in an isolated temporary `CODEX_HOME`, then saves any refreshed token back after Codex exits.
 
+## Uninstall
+
+Removes the shell wiring (the `cx` / `codex` commands). Your saved accounts are kept by default.
+
+**Linux / macOS**
+
+```bash
+# the one-liner installs to ~/.local/share/codex-auth-switcher by default
+bash ~/.local/share/codex-auth-switcher/uninstall.sh
+# also delete saved accounts:
+bash ~/.local/share/codex-auth-switcher/uninstall.sh --purge
+```
+
+(If you installed manually, run `bash uninstall.sh` from the repo you cloned.)
+
+**Windows PowerShell**
+
+```powershell
+& "$HOME\codex-auth-switcher\uninstall.ps1"
+# also delete saved accounts:
+& "$HOME\codex-auth-switcher\uninstall.ps1" -Purge
+```
+
+The uninstaller removes the `cx` symlink (`~/.local/bin/cx`),
+`~/.config/codex-auth-switcher/bash.sh`, and the `# Codex Auth Switcher` block
+from your shell profile (a `.cx-bak` backup is written first), but **keeps** the
+repo itself and the saved accounts in `~/.codex_auth_profiles`. It prints the
+command to delete the repo manually when it finishes; pass `--purge` / `-Purge`
+to also delete saved accounts.
+
 ## First-Time Setup
 
 If the current machine already has a logged-in Codex account:
