@@ -588,10 +588,10 @@ format_age() {
 write_usage_cache() {
     local name="$1"
     local plan="${2:-}"
-    local primary_used="${3:-0}"
+    local primary_used="${3:-}"
     local primary_reset="${4:-}"
     local primary_window="${5:-}"
-    local secondary_used="${6:-0}"
+    local secondary_used="${6:-}"
     local secondary_reset="${7:-}"
     local secondary_window="${8:-}"
     local reached="${9:-}"
@@ -604,10 +604,10 @@ write_usage_cache() {
         printf 'checked_at=%s\n' "$(now_epoch)"
         printf 'source=%s\n' "$source"
         [ -n "$plan" ] && printf 'plan=%s\n' "$plan"
-        printf 'primary_used_percent=%s\n' "$(format_usage_number "$primary_used")"
+        [ -n "$primary_used" ] && printf 'primary_used_percent=%s\n' "$(format_usage_number "$primary_used")"
         [ -n "$primary_reset" ] && printf 'primary_reset_at=%s\n' "$primary_reset"
         [ -n "$primary_window" ] && printf 'primary_window_seconds=%s\n' "$primary_window"
-        printf 'secondary_used_percent=%s\n' "$(format_usage_number "$secondary_used")"
+        [ -n "$secondary_used" ] && printf 'secondary_used_percent=%s\n' "$(format_usage_number "$secondary_used")"
         [ -n "$secondary_reset" ] && printf 'secondary_reset_at=%s\n' "$secondary_reset"
         [ -n "$secondary_window" ] && printf 'secondary_window_seconds=%s\n' "$secondary_window"
         [ -n "$reached" ] && [ "$reached" != "null" ] && printf 'rate_limit_reached_type=%s\n' "$reached"
@@ -615,27 +615,72 @@ write_usage_cache() {
     return 0
 }
 
+# rate-limit 窗的顯示名稱,取自窗長。
+#
+# **不能照 primary / secondary 的位置寫死。** 2026-08-06 實測 team 方案:
+# primary_window 的 limit_window_seconds 是 604800(七天)、secondary_window
+# 直接是 null。舊版寫死 "5h ... | W ..." 的結果是週限被標成 5 小時額度 ——
+# 看到「5h 只剩 4%」會以為等一下就回血,實際上要等三天多。
+window_label() {
+    local seconds="${1:-}"
+    case "$seconds" in
+        3600) printf '1h\n' ;;
+        10800) printf '3h\n' ;;
+        18000) printf '5h\n' ;;
+        86400) printf '24h\n' ;;
+        604800) printf 'W\n' ;;
+        ''|*[!0-9]*) printf 'quota\n' ;;
+        *) awk -v s="$seconds" 'BEGIN {
+               if (s >= 86400) printf "%dd\n", int(s / 86400 + 0.5)
+               else printf "%dh\n", int(s / 3600 + 0.5)
+           }' ;;
+    esac
+}
+
+# 依窗長找出對應的重置時間。哪個窗放在 primary、哪個放在 secondary 是伺服器
+# 決定的,這裡只認 window_label 的結果。找不到就 '-'。
+usage_reset_for_label() {
+    local name="$1" want="$2" file slot
+    file="$(usage_file "$name")"
+    [ -f "$file" ] || {
+        printf -- '-\n'
+        return 0
+    }
+    for slot in primary secondary; do
+        is_percent "$(read_usage_value "$file" "${slot}_used_percent")" || continue
+        if [ "$(window_label "$(read_usage_value "$file" "${slot}_window_seconds")")" = "$want" ]; then
+            format_epoch "$(read_usage_value "$file" "${slot}_reset_at")" 2>/dev/null || printf -- '-\n'
+            return 0
+        fi
+    done
+    printf -- '-\n'
+}
+
 usage_status() {
     local name="$1"
-    local file primary_used secondary_used primary secondary primary_reset secondary_reset checked age label
+    local file slot used window reset checked age label
     file="$(usage_file "$name")"
     [ -f "$file" ] || {
         printf -- '-\n'
         return 0
     }
 
-    primary_used="$(read_usage_value "$file" primary_used_percent)"
-    secondary_used="$(read_usage_value "$file" secondary_used_percent)"
-    if ! is_percent "$primary_used" || ! is_percent "$secondary_used"; then
+    # 只列真的存在的窗。舊版兩個窗都寫死要有,缺的那個被補成 0% used,於是
+    # 憑空長出一個「W 100% left @-」。
+    label=""
+    for slot in primary secondary; do
+        used="$(read_usage_value "$file" "${slot}_used_percent")"
+        is_percent "$used" || continue
+        window="$(window_label "$(read_usage_value "$file" "${slot}_window_seconds")")"
+        reset="$(format_reset_short "$(read_usage_value "$file" "${slot}_reset_at")")"
+        [ -n "$label" ] && label="${label} | "
+        label="${label}${window} $(format_remaining_number "$used")% left @${reset}"
+    done
+    [ -n "$label" ] || {
         printf -- '-\n'
         return 0
-    fi
+    }
 
-    primary="$(format_remaining_number "$primary_used")"
-    secondary="$(format_remaining_number "$secondary_used")"
-    primary_reset="$(format_reset_short "$(read_usage_value "$file" primary_reset_at)")"
-    secondary_reset="$(format_reset_short "$(read_usage_value "$file" secondary_reset_at)")"
-    label="5h ${primary}% left @${primary_reset} | W ${secondary}% left @${secondary_reset}"
     checked="$(read_usage_value "$file" checked_at)"
     age="$(format_age "$checked" 2>/dev/null || true)"
     if [ -n "$age" ]; then
@@ -670,10 +715,13 @@ refresh_usage_for_profile() {
     }
 
     plan="$(printf '%s\n' "$body" | jq -r '.plan_type // empty')"
-    primary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.used_percent // 0')"
+    # 用 empty 而不是 0:窗不存在時補 0 會變成「這個窗還剩 100%」,方向剛好
+    # 相反。team 方案的 secondary_window 就是 null,舊寫法讓 cx 一直顯示
+    # 「W 100% left」,而真正見底的週限被畫在 5h 那格。
+    primary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.used_percent // empty')"
     primary_reset="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.reset_at // empty')"
     primary_window="$(printf '%s\n' "$body" | jq -r '.rate_limit.primary_window.limit_window_seconds // empty')"
-    secondary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.used_percent // 0')"
+    secondary_used="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.used_percent // empty')"
     secondary_reset="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.reset_at // empty')"
     secondary_window="$(printf '%s\n' "$body" | jq -r '.rate_limit.secondary_window.limit_window_seconds // empty')"
     reached="$(printf '%s\n' "$body" | jq -r '.rate_limit_reached_type // .rate_limit.rate_limit_reached_type // empty')"
@@ -1287,8 +1335,8 @@ cmd_info() {
     printf 'account_id=%s\n' "$(mask_id "${account_id:-}")"
     printf 'subscription_expires_at=%s\n' "${expires_at:--}"
     printf 'usage=%s\n' "$(usage_status "$name")"
-    printf 'five_hour_resets_at=%s\n' "$(format_epoch "$(read_usage_value "$(usage_file "$name")" primary_reset_at)" 2>/dev/null || printf -- '-')"
-    printf 'weekly_resets_at=%s\n' "$(format_epoch "$(read_usage_value "$(usage_file "$name")" secondary_reset_at)" 2>/dev/null || printf -- '-')"
+    printf 'five_hour_resets_at=%s\n' "$(usage_reset_for_label "$name" 5h)"
+    printf 'weekly_resets_at=%s\n' "$(usage_reset_for_label "$name" W)"
     printf 'limit=%s\n' "$limit"
     printf 'profile_dir=%s\n' "$(profile_dir "$name")"
 }

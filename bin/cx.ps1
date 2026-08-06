@@ -506,6 +506,15 @@ function Format-UsageNumber($Value) {
     }
 }
 
+# 0-100 之間的數字才算有效百分比。快取裡沒有這個窗時該欄位整個不存在,
+# 用它來判斷「這個窗要不要顯示」。
+function Test-Percent($Value) {
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return $false }
+    $n = 0.0
+    if (-not [double]::TryParse([string]$Value, [ref]$n)) { return $false }
+    ($n -ge 0) -and ($n -le 100)
+}
+
 function Format-RemainingNumber($Value) {
     if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value) -or [string]$Value -eq "-") { return "-" }
     try {
@@ -546,10 +555,10 @@ function Write-UsageCache(
         "checked_at=$(Get-NowEpoch)",
         "source=$Source",
         $(if ($Plan) { "plan=$Plan" }),
-        "primary_used_percent=$(Format-UsageNumber $PrimaryUsed)",
+        $(if ($null -ne $PrimaryUsed -and "$PrimaryUsed" -ne "") { "primary_used_percent=$(Format-UsageNumber $PrimaryUsed)" }),
         $(if ($PrimaryResetAt) { "primary_reset_at=$PrimaryResetAt" }),
         $(if ($PrimaryWindowSeconds) { "primary_window_seconds=$PrimaryWindowSeconds" }),
-        "secondary_used_percent=$(Format-UsageNumber $SecondaryUsed)",
+        $(if ($null -ne $SecondaryUsed -and "$SecondaryUsed" -ne "") { "secondary_used_percent=$(Format-UsageNumber $SecondaryUsed)" }),
         $(if ($SecondaryResetAt) { "secondary_reset_at=$SecondaryResetAt" }),
         $(if ($SecondaryWindowSeconds) { "secondary_window_seconds=$SecondaryWindowSeconds" }),
         $(if ($ReachedType) { "rate_limit_reached_type=$ReachedType" })
@@ -557,24 +566,64 @@ function Write-UsageCache(
     Set-Content -LiteralPath $file -Value $lines
 }
 
+# rate-limit 窗的顯示名稱,取自窗長。
+#
+# **不能照 primary / secondary 的位置寫死。** 2026-08-06 實測 team 方案:
+# primary_window 的 limit_window_seconds 是 604800(七天)、secondary_window
+# 直接是 null。舊版寫死 "5h ... | W ..." 的結果是週限被標成 5 小時額度 ——
+# 看到「5h 只剩 4%」會以為等一下就回血,實際上要等三天多。
+function Get-WindowLabel($Seconds) {
+    $value = 0
+    if (-not [int]::TryParse("$Seconds", [ref]$value) -or $value -le 0) { return "quota" }
+    switch ($value) {
+        3600 { return "1h" }
+        10800 { return "3h" }
+        18000 { return "5h" }
+        86400 { return "24h" }
+        604800 { return "W" }
+    }
+    if ($value -ge 86400) { return "$([math]::Round($value / 86400))d" }
+    "$([math]::Round($value / 3600))h"
+}
+
 function Get-UsageStatus([string]$Name) {
     $map = Read-KeyValueMap (Get-UsageFile $Name)
     if ($map.Count -eq 0) { return "-" }
-    $primary = Format-RemainingNumber $map["primary_used_percent"]
-    $secondary = Format-RemainingNumber $map["secondary_used_percent"]
-    $primaryReset = Format-ResetShort $map["primary_reset_at"]
-    $secondaryReset = Format-ResetShort $map["secondary_reset_at"]
-    $label = "5h ${primary}% left @$primaryReset | W ${secondary}% left @$secondaryReset"
+    # 只列真的存在的窗。舊版兩個窗都寫死要有,缺的那個被補成 0% used,於是
+    # 憑空長出一個「W 100% left @-」。
+    $parts = @()
+    foreach ($slot in @("primary", "secondary")) {
+        $used = $map["${slot}_used_percent"]
+        if (-not (Test-Percent $used)) { continue }
+        $window = Get-WindowLabel $map["${slot}_window_seconds"]
+        $reset = Format-ResetShort $map["${slot}_reset_at"]
+        $left = Format-RemainingNumber $used
+        $parts += "$window ${left}% left @$reset"
+    }
+    if ($parts.Count -eq 0) { return "-" }
+    $label = ($parts -join " | ")
     $age = Format-Age $map["checked_at"]
     if ($age) { return "$label ($age)" }
     $label
 }
 
-function Get-UsageResetMap([string]$Name) {
+# 依窗長回傳重置時間。哪個窗放在 primary、哪個放在 secondary 是伺服器決定的,
+# 這裡只認 Get-WindowLabel 的結果。
+function Get-UsageResetFor([string]$Name, [string]$Want) {
     $map = Read-KeyValueMap (Get-UsageFile $Name)
+    foreach ($slot in @("primary", "secondary")) {
+        if (-not (Test-Percent $map["${slot}_used_percent"])) { continue }
+        if ((Get-WindowLabel $map["${slot}_window_seconds"]) -eq $Want) {
+            return Format-Epoch $map["${slot}_reset_at"]
+        }
+    }
+    "-"
+}
+
+function Get-UsageResetMap([string]$Name) {
     [PSCustomObject]@{
-        Primary = Format-Epoch $map["primary_reset_at"]
-        Secondary = Format-Epoch $map["secondary_reset_at"]
+        FiveHour = Get-UsageResetFor $Name "5h"
+        Weekly = Get-UsageResetFor $Name "W"
     }
 }
 
@@ -928,8 +977,8 @@ function Cmd-Info([string[]]$Rest) {
     "account_id=$(Mask-Id $meta.AccountId)"
     "subscription_expires_at=$($meta.SubscriptionExpiresAt)"
     "usage=$(Get-UsageStatus $name)"
-    "five_hour_resets_at=$($resets.Primary)"
-    "weekly_resets_at=$($resets.Secondary)"
+    "five_hour_resets_at=$($resets.FiveHour)"
+    "weekly_resets_at=$($resets.Weekly)"
     "limit=$(Get-LimitStatus $name)"
     "profile_dir=$(Get-ProfileDir $name)"
 }
