@@ -81,31 +81,33 @@ secure_auth_file() {
     chmod 600 "$file" 2>/dev/null || true
 }
 
-# Extract the ChatGPT workspace id (account_id) stored in a profile's auth.json.
-profile_account_id() {
+# Extract the current refresh token. This is intentionally used only for exact
+# duplicate detection; it cannot prove that two different tokens belong to
+# different refresh-token families.
+profile_refresh_token() {
     local auth
     auth="$(profile_auth "$1")"
     [ -f "$auth" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
-    jq -r '.tokens.account_id // empty' "$auth" 2>/dev/null || true
+    jq -r '.tokens.refresh_token // empty' "$auth" 2>/dev/null | sed -n '1p'
 }
 
-# Warn if another profile points at the SAME workspace (account_id). Two profiles
-# for one workspace share a single rotating refresh-token family, so keeping both
-# is what triggers OpenAI's reuse-detection revocation. Warn, don't block.
-warn_duplicate_account() {
-    local name="$1" acc dir other oacc
-    acc="$(profile_account_id "$name")"
-    [ -n "$acc" ] || return 0
+# Warn if another profile currently holds the exact same refresh token. This
+# catches copied/imported duplicate profiles without blocking legitimate
+# same-user multi-workspace logins, which should get separate login grants.
+warn_duplicate_refresh_token() {
+    local name="$1" token dir other other_token
+    token="$(profile_refresh_token "$name")"
+    [ -n "$token" ] || return 0
     for dir in "$CX_PROFILES_DIR"/*/; do
         [ -d "$dir" ] || continue
         other="$(basename "$dir")"
         case "$other" in .lock|.runtime) continue ;; esac
         [ "$other" = "$name" ] && continue
-        oacc="$(profile_account_id "$other")"
-        if [ -n "$oacc" ] && [ "$oacc" = "$acc" ]; then
-            printf 'cx: warning: profile "%s" uses the same workspace (account_id %s) as "%s".\n' "$other" "$acc" "$name" >&2
-            printf 'cx:          one workspace = one token family; keeping both invites reuse revocation. Consider: cx remove %s\n' "$other" >&2
+        other_token="$(profile_refresh_token "$other")"
+        if [ -n "$other_token" ] && [ "$other_token" = "$token" ]; then
+            printf 'cx: warning: profile "%s" has the same refresh token as "%s".\n' "$other" "$name" >&2
+            printf 'cx:          duplicated auth.json files invite refresh-token reuse revocation. Consider: cx remove %s\n' "$other" >&2
         fi
     done
 }
@@ -945,9 +947,15 @@ cmd_login() {
     status=$?
     set -e
 
-    if [ "$status" -ne 0 ] || [ ! -f "$tmp_home/auth.json" ]; then
+    if [ "$status" -ne 0 ]; then
         rm -rf "$tmp_home"
         return "$status"
+    fi
+    if [ ! -f "$tmp_home/auth.json" ]; then
+        printf 'cx: codex login succeeded but did not write %s\n' "$tmp_home/auth.json" >&2
+        printf 'cx: set Codex CLI credential storage to file for this login flow, then retry.\n' >&2
+        rm -rf "$tmp_home"
+        return 1
     fi
 
     # Save the freshly minted token into the profile (only auth.json is harvested).
@@ -956,7 +964,7 @@ cmd_login() {
     secure_auth_file "$(profile_auth "$name")"
     rm -rf "$tmp_home"
 
-    warn_duplicate_account "$name"
+    warn_duplicate_refresh_token "$name"
 
     # Activate the profile. This is a pure file swap (no login, no revoke).
     # Only fold the active profile's possibly-rotated shared token back when we

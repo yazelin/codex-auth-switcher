@@ -207,7 +207,7 @@ cx login coworker-1
 甚至因 refresh token 的 reuse 偵測連坐撤銷整批。隔離登入讓登入動作碰不到其他 profile,
 因此你可以安全地保留多個帳號(含同一個 email 底下的多個 workspace)並用 `cx switch` 自由切換。
 
-> 經驗法則:① 每個帳號各自 `cx login` 一次建好 profile;② 之後只用 `cx switch` / `cx use` 切換(純換檔、不重登);③ 同一個 workspace 不要開兩個 profile(會被警告)。
+> 經驗法則:① 每個 profile 各自 `cx login` 一次建好；② 之後只用 `cx switch` / `cx use` 切換(純換檔、不重登)；③ 不要複製同一份 `auth.json` 做成兩個 profile(會被警告)。
 
 選擇 Codex 要使用的 auth：
 

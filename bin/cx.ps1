@@ -92,31 +92,34 @@ function Get-ProfileAuth([string]$Name) {
     Join-Path (Get-ProfileDir $Name) "auth.json"
 }
 
-# Extract the ChatGPT workspace id (account_id) stored in a profile's auth.json.
-function Get-ProfileAccountId([string]$Name) {
+# Extract the current refresh token. This is intentionally used only for exact
+# duplicate detection; it cannot prove that two different tokens belong to
+# different refresh-token families.
+function Get-ProfileRefreshToken([string]$Name) {
     $auth = Get-ProfileAuth $Name
     if (-not (Test-Path -LiteralPath $auth)) { return $null }
     try {
-        return ((Get-Content -LiteralPath $auth -Raw | ConvertFrom-Json).tokens.account_id)
+        $tokens = (Get-Content -LiteralPath $auth -Raw | ConvertFrom-Json -ErrorAction Stop).tokens
+        return [string](Get-Prop $tokens "refresh_token")
     } catch {
         return $null
     }
 }
 
-# Warn if another profile points at the SAME workspace (account_id). Two profiles
-# for one workspace share a single rotating refresh-token family, so keeping both
-# is what triggers OpenAI's reuse-detection revocation. Warn, don't block.
-function Warn-DuplicateAccount([string]$Name) {
-    $acc = Get-ProfileAccountId $Name
-    if ([string]::IsNullOrWhiteSpace($acc)) { return }
+# Warn if another profile currently holds the exact same refresh token. This
+# catches copied/imported duplicate profiles without blocking legitimate
+# same-user multi-workspace logins, which should get separate login grants.
+function Warn-DuplicateRefreshToken([string]$Name) {
+    $token = Get-ProfileRefreshToken $Name
+    if ([string]::IsNullOrWhiteSpace($token)) { return }
     if (-not (Test-Path -LiteralPath $ProfilesDir)) { return }
     foreach ($dir in (Get-ChildItem -LiteralPath $ProfilesDir -Directory -ErrorAction SilentlyContinue)) {
         $other = $dir.Name
         if ($other -eq '.lock' -or $other -eq '.runtime' -or $other -eq $Name) { continue }
-        $oacc = Get-ProfileAccountId $other
-        if ($oacc -and ($oacc -eq $acc)) {
-            Write-Warning "cx: profile `"$other`" uses the same workspace (account_id $acc) as `"$Name`"."
-            Write-Warning "cx: one workspace = one token family; keeping both invites reuse revocation. Consider: cx remove $other"
+        $otherToken = Get-ProfileRefreshToken $other
+        if (-not [string]::IsNullOrWhiteSpace($otherToken) -and $otherToken -eq $token) {
+            Write-Warning "cx: profile `"$other`" has the same refresh token as `"$Name`"."
+            Write-Warning "cx: duplicated auth.json files invite refresh-token reuse revocation. Consider: cx remove $other"
         }
     }
 }
@@ -820,8 +823,14 @@ function Cmd-Login([string[]]$Rest) {
             $loginCommandArgs = @("login") + $loginArgs
             $status = Invoke-CodexWithEnv $name $loginCommandArgs $tmpHome
             $tmpAuth = Join-Path $tmpHome "auth.json"
-            if ($status -ne 0 -or -not (Test-Path -LiteralPath $tmpAuth)) {
+            if ($status -ne 0) {
                 $global:LASTEXITCODE = $status
+                return
+            }
+            if (-not (Test-Path -LiteralPath $tmpAuth)) {
+                Write-Error "cx: codex login succeeded but did not write $tmpAuth"
+                Write-Error "cx: set Codex CLI credential storage to file for this login flow, then retry."
+                $global:LASTEXITCODE = 1
                 return
             }
 
@@ -829,7 +838,7 @@ function Cmd-Login([string[]]$Rest) {
             New-Item -ItemType Directory -Force -Path (Get-ProfileDir $name) | Out-Null
             Copy-Item -LiteralPath $tmpAuth -Destination (Get-ProfileAuth $name) -Force
 
-            Warn-DuplicateAccount $name
+            Warn-DuplicateRefreshToken $name
 
             # Activate (pure file swap, no login/revoke). Only fold the active
             # profile's possibly-rotated shared token back when switching AWAY from
