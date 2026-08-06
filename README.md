@@ -207,7 +207,7 @@ cx login coworker-1
 甚至因 refresh token 的 reuse 偵測連坐撤銷整批。隔離登入讓登入動作碰不到其他 profile,
 因此你可以安全地保留多個帳號(含同一個 email 底下的多個 workspace)並用 `cx switch` 自由切換。
 
-> 經驗法則:① 每個帳號各自 `cx login` 一次建好 profile;② 之後只用 `cx switch` / `cx use` 切換(純換檔、不重登);③ 同一個 workspace 不要開兩個 profile(會被警告)。
+> 經驗法則:① 每個 profile 各自 `cx login` 一次建好；② 之後只用 `cx switch` / `cx use` 切換(純換檔、不重登)；③ 不要複製同一份 `auth.json` 做成兩個 profile(會被警告)。
 
 選擇 Codex 要使用的 auth：
 
@@ -245,11 +245,13 @@ codex
 ```text
 CURRENT  PROFILE                  LOGIN      EMAIL                        PLAN       USAGE                            LIMIT
 *        main                     ok         ma***@example.com            plus       5h 97% left @06:15 | W 48% left @Sun 05:45 (4m) -
-         team-a                   ok         te***@example.com            team       5h 22% left @03:59 | W 59% left @Sun 10:06 (2h) hit until 2026-05-25 17:06
+         team-a                   ok         te***@example.com            team       W 22% left @Sun 10:06 (2h)       hit until 2026-05-25 17:06
          coworker-1               not-login  -                            -          -                                -
 ```
 
-`LOGIN` 欄位依據該 profile 是否有已儲存的 `auth.json` 來判斷。`EMAIL` 與 `PLAN` 是在有效時從 ChatGPT `id_token` 解析而來。`USAGE` 顯示快取的 5 小時及每週配額剩餘量；`@` 後為本地重置時間，最後的時間戳為快取更新時間。Email 與帳號 ID 在終端機顯示時會遮罩處理。
+`LOGIN` 欄位依據該 profile 是否有已儲存的 `auth.json` 來判斷。`EMAIL` 與 `PLAN` 是在有效時從 ChatGPT `id_token` 解析而來。`USAGE` 顯示快取的配額剩餘量；`@` 後為本地重置時間，最後的時間戳為快取更新時間。Email 與帳號 ID 在終端機顯示時會遮罩處理。
+
+每個窗的名稱（`5h`、`W`、`24h`…）取自 API 回報的 `limit_window_seconds`，不是照 `primary_window` / `secondary_window` 的位置決定的。不同方案給的窗不一樣：team 方案只給一個七天窗、放在 `primary_window`，`secondary_window` 是 null，這種帳號就只會顯示一個 `W`。伺服器沒回報的窗不會顯示，也不會被當成「還剩 100%」。
 
 需要即時用量時請使用 `cx usage` 或 `cx list --live`。即時刷新會將各選定 profile 的 ChatGPT access token 送至 `https://chatgpt.com/backend-api/wham/usage`，並將結果儲存至：
 
