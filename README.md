@@ -23,6 +23,14 @@ bash <(curl -fsSL https://raw.githubusercontent.com/yazelin/codex-auth-switcher/
 
 安裝程式會 clone 此 repo、設定好 shell profile，並印出初次設定說明。
 
+> **兩條安裝路徑請擇一。** 一行安裝會把 repo clone 到固定位置（Linux / macOS 是
+> `~/.local/share/codex-auth-switcher`，Windows 是 `~\codex-auth-switcher`），
+> [手動安裝](#手動安裝--linux--macos)則是從你自己 clone 的位置建立連結。兩條都跑過，
+> 機器上就會有兩份 repo，而 `cx` 只會指向最後安裝的那份 —— 在另一份改 code 完全不會生效。
+>
+> **要改 code 的人請走手動安裝。** 一行安裝的目錄看起來像產物，其實是完整的 git repo；
+> 在裡面直接改 `cx` 不會有人發現，下次更新還會因為 `git pull --ff-only` 被本機修改擋下而失敗。
+
 ---
 
 這是一組小型 shell 工具，用於在同一台電腦上管理多個 Codex ChatGPT auth 身份，同時保留共用的 Codex 設定。
@@ -106,6 +114,8 @@ Profile 名稱可自由命名，`work`、`personal`、`team-a`、`backup` 或同
 請參閱上方的**[快速安裝](#快速安裝)**取得一行指令。
 
 ### 手動安裝 — Linux / macOS
+
+要修改或開發 `cx` 的話走這條。
 
 Clone 此 repo，然後在 repo 根目錄執行：
 
