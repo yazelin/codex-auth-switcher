@@ -17,7 +17,26 @@ Write-Host ""
 # ── 1. Clone or update ──────────────────────────────────────────────────────
 if (Test-Path (Join-Path $InstallDir ".git")) {
     Write-Host "  Updating existing install at $InstallDir ..." -ForegroundColor Yellow
+    # 這個目錄長得像產物,其實是完整的 git repo —— 有人會直接在裡面改 cx
+    # (因為 cx 就是它),改完 pull 就會被擋下。裸的 git 錯誤訊息看不出是
+    # 自己改過東西,所以這裡自己講清楚。
     & git -C $InstallDir pull --ff-only origin main
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "  Update failed." -ForegroundColor Yellow -NoNewline
+        Write-Host " This directory is a real git repo, not just build output."
+        Write-Host "  If you edited cx in place, your changes are blocking the update:"
+        Write-Host ""
+        Write-Host "    git -C $InstallDir status --short" -ForegroundColor DarkGray
+        Write-Host "    git -C $InstallDir diff" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Save anything worth keeping, then discard and retry:"
+        Write-Host ""
+        Write-Host "    git -C $InstallDir checkout -- ." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  To develop cx, clone it somewhere else and run .\install.ps1 there instead."
+        exit 1
+    }
 } else {
     Write-Host "  Cloning to $InstallDir ..." -ForegroundColor Yellow
     & git clone --depth 1 $RepoUrl $InstallDir

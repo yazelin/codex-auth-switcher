@@ -29,7 +29,20 @@ echo ""
 # ── 1. Clone or update ──────────────────────────────────────────────────────
 if [ -d "${INSTALL_DIR}/.git" ]; then
     printf "  ${YELLOW}Updating existing install at %s ...${RESET}\n" "$INSTALL_DIR"
-    git -C "$INSTALL_DIR" pull --ff-only origin main
+    # 這個目錄長得像產物,其實是完整的 git repo —— 有人會直接在裡面改 cx
+    # (因為 `cx` 就是它),改完 pull 就會被擋下。裸的 git 錯誤訊息看不出
+    # 是自己改過東西,所以這裡自己講清楚。
+    if ! git -C "$INSTALL_DIR" pull --ff-only origin main; then
+        echo ""
+        printf "  ${YELLOW}Update failed.${RESET} This directory is a real git repo, not just build output.\n"
+        printf "  If you edited cx in place, your changes are blocking the update:\n\n"
+        printf "    ${GRAY}git -C %s status --short${RESET}\n" "$INSTALL_DIR"
+        printf "    ${GRAY}git -C %s diff${RESET}\n\n" "$INSTALL_DIR"
+        printf "  Save anything worth keeping, then discard and retry:\n\n"
+        printf "    ${GRAY}git -C %s checkout -- .${RESET}\n\n" "$INSTALL_DIR"
+        printf "  To develop cx, clone it somewhere else and run ./install.sh there instead.\n"
+        exit 1
+    fi
 else
     printf "  ${YELLOW}Cloning to %s ...${RESET}\n" "$INSTALL_DIR"
     git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
