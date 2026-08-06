@@ -1,4 +1,4 @@
-# Codex Auth Switcher — Windows one-line installer
+﻿# Codex Auth Switcher — Windows one-line installer
 # Usage (paste into any PowerShell terminal):
 #
 #   irm https://raw.githubusercontent.com/yazelin/codex-auth-switcher/main/install-oneliner.ps1 | iex
