@@ -219,7 +219,36 @@ function Save-ActiveAuthIfKnown {
 function Stage-ProfileAuth([string]$Name) {
     $auth = Get-ProfileAuth $Name
     if (-not (Test-Path -LiteralPath $auth)) { Die "profile has no auth.json: $Name; run: cx login $Name" }
-    Copy-Item -LiteralPath $auth -Destination (Get-SharedAuth) -Force
+    $shared = Get-SharedAuth
+    if ((Test-Path -LiteralPath $shared) -and
+        (Get-FileHash -LiteralPath $auth).Hash -eq (Get-FileHash -LiteralPath $shared).Hash) { return }
+    Copy-Item -LiteralPath $auth -Destination $shared -Force
+    Stop-CodexDaemon
+}
+
+# codex 0.161 起，終端機的 codex 預設接到共享的背景 app-server daemon，
+# daemon 只在啟動時讀一次 auth.json。不停掉它，換了 auth.json 之後重開
+# codex 還是接回舊帳號。停掉就好，下一個 codex 會用新的 auth.json 重新起。
+function Stop-CodexDaemon {
+    $pidFile = Join-Path $CodexHome "app-server-daemon\daemon.pid"
+    if (-not (Test-Path -LiteralPath $pidFile)) { return }
+    try { $daemonPid = (Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json).pid } catch { return }
+    if (-not $daemonPid -or -not (Get-Process -Id $daemonPid -ErrorAction SilentlyContinue)) { return }
+    $prevHome = $env:CODEX_HOME
+    try {
+        $env:CODEX_HOME = $CodexHome
+        & (Find-CodexBin) app-server daemon stop *> $null
+        $ok = $LASTEXITCODE -eq 0
+    } catch {
+        $ok = $false
+    } finally {
+        $env:CODEX_HOME = $prevHome
+    }
+    if ($ok) {
+        Write-Host "Stopped Codex background daemon (it held the previous account)."
+    } else {
+        [Console]::Error.WriteLine("cx: could not stop Codex background daemon; run: codex app-server daemon stop")
+    }
 }
 
 function Store-ProfileAuth([string]$Name) {
