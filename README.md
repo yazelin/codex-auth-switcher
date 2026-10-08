@@ -428,6 +428,8 @@ cx doctor
 
 `cx ps` 列出偵測到的 Codex 程序，標記為 `active` 或 `background`。`active` 程序預設會阻擋登入，並在 `cx switch` 時被終止。`background` 程序（如 app-server 或 IDE 輔助程序）會顯示但不阻擋操作。
 
+切換到不同帳號時，cx 會停掉 Codex 0.161 起的共享背景 daemon（`codex app-server daemon`）：終端機的 codex 預設接到它，而它只在啟動時讀一次 auth.json。下一次開 codex 會自動用新帳號重新起。
+
 若要略過程序保護：
 
 ```bash

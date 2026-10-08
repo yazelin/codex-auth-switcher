@@ -211,8 +211,24 @@ stage_profile_auth() {
     local auth
     auth="$(profile_auth "$name")"
     [ -f "$auth" ] || die "profile has no auth.json: $name; run: cx login $name"
+    cmp -s "$auth" "$(shared_auth)" && return 0
     cp "$auth" "$(shared_auth)"
     secure_auth_file "$(shared_auth)"
+    stop_codex_daemon
+}
+
+# codex 0.161 起，終端機的 codex 預設接到共享的背景 app-server daemon，
+# daemon 只在啟動時讀一次 auth.json。不停掉它，換了 auth.json 之後重開
+# codex 還是接回舊帳號。停掉就好，下一個 codex 會用新的 auth.json 重新起。
+stop_codex_daemon() {
+    local pid
+    pid="$(sed -n 's/^{"pid":\([0-9]*\).*/\1/p' "$CX_CODEX_HOME/app-server-daemon/daemon.pid" 2>/dev/null)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+    if CODEX_HOME="$CX_CODEX_HOME" "$(find_codex_bin)" app-server daemon stop >/dev/null 2>&1; then
+        printf 'Stopped Codex background daemon (it held the previous account).\n'
+    else
+        printf 'cx: could not stop Codex background daemon; run: codex app-server daemon stop\n' >&2
+    fi
 }
 
 store_profile_auth() {

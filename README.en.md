@@ -408,6 +408,8 @@ cx doctor
 
 `cx ps` lists detected Codex processes as `active` or `background`. `active` processes block login by default and are killed by `cx switch`. `background` processes such as app-server or IDE helper processes are shown but do not block.
 
+When switching to a different account, cx stops the shared background daemon (`codex app-server daemon`, Codex 0.161+): the terminal codex connects to it by default and it reads auth.json only at startup. The next codex launch restarts it with the new account.
+
 To override the process guard:
 
 ```bash

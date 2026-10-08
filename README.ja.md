@@ -408,6 +408,8 @@ cx doctor
 
 `cx ps` は検出された Codex プロセスを `active` または `background` として一覧表示します。`active` プロセスはデフォルトでログインをブロックし、`cx switch` によって終了されます。アプリサーバーや IDE ヘルパープロセスなどの `background` プロセスは表示されますがブロックしません。
 
+別のアカウントに切り替えると、cx は Codex 0.161 以降の共有バックグラウンド daemon（`codex app-server daemon`）を停止します。ターミナルの codex はデフォルトでこれに接続し、daemon は起動時にしか auth.json を読みません。次に codex を起動すると新しいアカウントで再起動されます。
+
 プロセスガードを無効化するには:
 
 ```bash
