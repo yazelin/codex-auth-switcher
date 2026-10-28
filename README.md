@@ -419,6 +419,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\codex-auth-s
 
 也就是說，當使用同一個使用中 profile 時，可以同時開啟兩個或三個 Codex session。
 
+同時啟動或結束多個 `cx run` 時，搬動登入檔（共用的 `auth.json` 與各帳號的 `auth.json` 之間）的那一瞬間，由 `~/.codex_auth_profiles/.runtime/auth.lock.d` 這把鎖保護，只鎖搬檔，不鎖 codex 執行期間；複製時先寫暫存檔再替換，來源是空檔就不搬。沒有這把鎖時，兩個 `cx run` 同時搬檔，可能把登入檔蓋成 0 位元組，該帳號就登出。目前只有 bash 版的 `cx` 有，PowerShell 版 `cx.ps1` 還沒加。`tests/cx-run-concurrency.sh` 會同時開 40 個假的 `cx run`，檢查登入檔沒被蓋空。
+
 `cx use` 與 `cx login` 在變更 `~/.codex/auth.json` 前會檢查是否有其他 Codex 程序正在執行。`cx switch` 則刻意在切換共用的使用中 profile 前先終止所有 Codex 程序。
 
 ```bash
