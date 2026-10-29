@@ -197,13 +197,52 @@ find_codex_bin() {
     die "codex executable not found; set CX_CODEX_BIN=/path/to/codex"
 }
 
+# 登入檔的搬動（共享 auth.json 與各帳號 auth.json 之間）一律先拿這把鎖，
+# 只鎖搬檔的那一瞬間，不鎖 codex 執行期間，所以同時開好幾個 cx run 仍然可以。
+# 沒有鎖時 cp 先把目的檔截成 0 位元組，另一個程序剛好在讀，就把空檔搬進帳號，該帳號登出。
+auth_lock_dir() { printf '%s/.runtime/auth.lock.d\n' "$CX_PROFILES_DIR"; }
+
+auth_lock() {
+    local dir pid tries=0
+    dir="$(auth_lock_dir)"
+    mkdir -p "$CX_PROFILES_DIR/.runtime"
+    until mkdir "$dir" 2>/dev/null; do
+        pid="$(cat "$dir/pid" 2>/dev/null || true)"
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            rm -rf "$dir"   # 持鎖的程序已經死了
+            continue
+        fi
+        tries=$((tries + 1))
+        [ "$tries" -le 300 ] || die "cx: could not get auth lock ($dir), held by pid ${pid:-?}"
+        sleep 0.1
+    done
+    printf '%s\n' "$$" > "$dir/pid"
+}
+
+auth_unlock() {
+    local dir
+    dir="$(auth_lock_dir)"
+    [ "$(cat "$dir/pid" 2>/dev/null || true)" = "$$" ] && rm -rf "$dir"
+    return 0
+}
+
+# 原子複製登入檔：先寫暫存檔再 mv；來源是空檔就不搬，免得把壞檔蓋到好檔上。
+copy_auth() {
+    local src="$1" dst="$2" tmp
+    [ -s "$src" ] || { printf 'cx: refusing to copy empty auth file: %s\n' "$src" >&2; return 1; }
+    tmp="$dst.tmp.$$"
+    cp "$src" "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$dst"
+}
+
 save_active_auth_if_known() {
     local name
     name="$(current_profile)"
     [ -n "$name" ] || return 0
     [ -f "$(shared_auth)" ] || return 0
     mkdir -p "$(profile_dir "$name")"
-    cp "$(shared_auth)" "$(profile_auth "$name")"
+    copy_auth "$(shared_auth)" "$(profile_auth "$name")" || return 0
 }
 
 stage_profile_auth() {
@@ -212,7 +251,7 @@ stage_profile_auth() {
     auth="$(profile_auth "$name")"
     [ -f "$auth" ] || die "profile has no auth.json: $name; run: cx login $name"
     cmp -s "$auth" "$(shared_auth)" && return 0
-    cp "$auth" "$(shared_auth)"
+    copy_auth "$auth" "$(shared_auth)" || die "profile auth is empty: $name; run: cx login $name"
     secure_auth_file "$(shared_auth)"
     stop_codex_daemon
 }
@@ -235,7 +274,7 @@ store_profile_auth() {
     local name="$1"
     [ -f "$(shared_auth)" ] || return 0
     mkdir -p "$(profile_dir "$name")"
-    cp "$(shared_auth)" "$(profile_auth "$name")"
+    copy_auth "$(shared_auth)" "$(profile_auth "$name")" || return 0
     secure_auth_file "$(profile_auth "$name")"
 }
 
@@ -1056,9 +1095,11 @@ cmd_use() {
         return 0
     fi
     assert_no_active_codex "switch profiles"
+    auth_lock
     save_active_auth_if_known
     stage_profile_auth "$name"
     set_current_profile "$name"
+    auth_unlock
     printf 'current: %s\n' "$name"
 }
 
@@ -1367,8 +1408,10 @@ cmd_run() {
     name="$(require_current_profile)"
     [ -f "$(profile_auth "$name")" ] || die "profile has no auth.json: $name; run: cx login $name"
 
+    auth_lock
     save_active_auth_if_known
     stage_profile_auth "$name"
+    auth_unlock
     codex_bin="$(find_codex_bin)"
     run_start="$(now_epoch)"
 
@@ -1377,7 +1420,9 @@ cmd_run() {
     status=$?
     set -e
 
+    auth_lock
     store_profile_auth "$name"
+    auth_unlock
     if [ -z "$(active_codex_processes || true)" ]; then
         scan_limit_for_profile "$name" "$CX_CODEX_HOME" "$run_start" || true
     fi
